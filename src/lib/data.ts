@@ -302,13 +302,11 @@ export const fetchPricingData = async (
   let providerPathSegment = '';
 
   if (provider === 'AWS') {
-    providerPathSegment = 'EC2'; // As specified by user for AWS
+    providerPathSegment = 'EC2';
   } else if (provider === 'Google Cloud') {
-    // IMPORTANT: User needs to confirm and update this path for Google Cloud
-    providerPathSegment = 'pricing/Google Cloud'; // Placeholder, using old structure prefix
+    providerPathSegment = 'GCE'; 
   } else if (provider === 'Azure') {
-    // IMPORTANT: User needs to confirm and update this path for Azure
-    providerPathSegment = 'pricing/Azure'; // Placeholder, using old structure prefix
+    providerPathSegment = 'azure_prices_python';
   }
 
   // Construct the GCS URL. Ensure the sub-path (/${regionId}/${instanceId}/${pricingModelValue}.json)
@@ -362,5 +360,3 @@ export const fetchPricingData = async (
   // console.log("Fetched (mocked) PriceData:", fetchedPriceData);
   return fetchedPriceData;
 };
-
-    
