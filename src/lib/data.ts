@@ -13,54 +13,64 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   const url = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`;
   console.log(`[${fileName}] Attempting to fetch metadata from: ${url}`);
   
-  let responseText: string;
+  let response: Response;
   try {
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      console.error(`[${fileName}] HTTP error fetching metadata from ${url}. Status: ${response.status} ${response.statusText}`);
-      let errorBody = "";
-      try {
-        errorBody = await response.text();
-        console.error(`[${fileName}] HTTP Error Response Body (Status ${response.status}):\n${errorBody}`);
-      } catch (bodyReadError: any) {
-        console.error(`[${fileName}] Could not read HTTP error response body. Status: ${response.status}. Body Read Error Name: ${bodyReadError.name}, Message: ${bodyReadError.message}`);
-      }
-      return null;
+    response = await fetch(url);
+  } catch (networkError: any) {
+    console.error(`[${fileName}] Network error during fetch for ${url}:`);
+    console.error(`  Error Name: ${networkError.name}`);
+    console.error(`  Error Message: ${networkError.message}`);
+    if (networkError.stack) {
+      console.error(`  Error Stack: ${networkError.stack}`);
     }
-
-    const contentType = response.headers.get('content-type');
-    // Allow text/plain if it might be JSON, but warn. Strictly, we expect application/json.
-    if (!contentType || (!contentType.includes('application/json') && !contentType.includes('text/plain'))) {
-        console.warn(`[${fileName}] WARNING: Metadata file from ${url} has unexpected Content-Type: ${contentType}. Expected 'application/json' or 'text/plain'. File will be ignored.`);
-         try {
-            const textContentForWarning = await response.text();
-            console.warn(`[${fileName}] Raw text content (unexpected Content-Type ${contentType}):\n${textContentForWarning}`);
-        } catch (readTextError: any) {
-            console.error(`[${fileName}] Could not read text content of response with unexpected Content-Type. Read Error Name: ${readTextError.name}, Message: ${readTextError.message}`);
-        }
-        return null; 
-    }
-    
-    responseText = await response.text();
-
-  } catch (networkOrTextError: any) {
-    console.error(`[${fileName}] Network error or error reading response text for ${url}:`);
-    console.error(`  Error Name: ${networkOrTextError.name}`);
-    console.error(`  Error Message: ${networkOrTextError.message}`);
-    if (networkOrTextError.stack) {
-      console.error(`  Error Stack: ${networkOrTextError.stack}`);
-    }
-    if (networkOrTextError.cause) { // Some fetch errors (like TypeErrors in some environments) might have a 'cause'
-        console.error(`  Error Cause:`, networkOrTextError.cause);
+    if (networkError.cause) { 
+        console.error(`  Error Cause:`, networkError.cause);
     }
     return null;
   }
 
+  // Check if the request was successful (e.g., not a 404 or 403)
+  if (!response.ok) {
+    console.error(`[${fileName}] HTTP error fetching metadata from ${url}. Status: ${response.status} ${response.statusText}`);
+    let errorBody = "";
+    try {
+      errorBody = await response.text();
+      console.error(`[${fileName}] HTTP Error Response Body (Status ${response.status}):\n${errorBody}`);
+    } catch (bodyReadError: any) {
+      console.error(`[${fileName}] Could not read HTTP error response body. Status: ${response.status}. Body Read Error Name: ${bodyReadError.name}, Message: ${bodyReadError.message}`);
+    }
+    return null;
+  }
+
+  let responseText: string;
+  try {
+    responseText = await response.text();
+  } catch (textReadError: any) {
+    console.error(`[${fileName}] Error reading response text from ${url}:`);
+    console.error(`  Error Name: ${textReadError.name}`);
+    console.error(`  Error Message: ${textReadError.message}`);
+    if (textReadError.stack) {
+      console.error(`  Error Stack: ${textReadError.stack}`);
+    }
+    return null;
+  }
+
+  const contentType = response.headers.get('content-type');
+  // Allow text/plain if it might be JSON, but warn. Strictly, we expect application/json.
+  if (!contentType || (!contentType.includes('application/json') && !contentType.includes('text/plain'))) {
+      console.warn(`[${fileName}] WARNING: Metadata file from ${url} has unexpected Content-Type: ${contentType}. Expected 'application/json' or 'text/plain'. File will be ignored.`);
+        try {
+          console.warn(`[${fileName}] Raw text content (unexpected Content-Type ${contentType}):\n${responseText}`);
+      } catch (readTextError: any) {
+          console.error(`[${fileName}] Could not re-read text content of response with unexpected Content-Type. Read Error Name: ${readTextError.name}, Message: ${readTextError.message}`);
+      }
+      return null; 
+  }
+  
   try {
     const data = JSON.parse(responseText);
     if (!Array.isArray(data)) {
-      console.error(`[${fileName}] Parsed data from ${url} is not an array. Content was logged above if read successfully. Parsed as:`, data);
+      console.error(`[${fileName}] Parsed data from ${url} is not an array. Content:\n${responseText}\nParsed as:`, data);
       return null;
     }
     console.log(`[${fileName}] Successfully fetched and parsed from ${url}. Items: ${data.length}`);
@@ -72,7 +82,7 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
     if (jsonParseError.stack) {
         console.error(`  Parse Error Stack: ${jsonParseError.stack}`);
     }
-    console.error(`  Raw text content that failed JSON parsing for ${fileName} (see above if logged, or below if different):\n${responseText}`);
+    console.error(`  Raw text content that failed JSON parsing for ${fileName}:\n${responseText}`);
     return null;
   }
 }
@@ -491,3 +501,4 @@ export const fetchPricingData = async (
     };
   }
 };
+
