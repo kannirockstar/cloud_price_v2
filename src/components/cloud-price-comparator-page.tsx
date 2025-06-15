@@ -22,7 +22,8 @@ import {
   getMachineFamilyGroups,
   getMachineInstancesForFamily,
   fetchPricingData,
-  loadProviderMetadata,
+  loadProviderMetadata, // Ensure this is imported
+  getPricingModelsForProvider, // Added import for pricing models
 } from '@/lib/data';
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, CpuDetails } from '@/lib/types';
 
@@ -98,19 +99,20 @@ export default function CloudPriceComparatorPage() {
     console.log('[CloudPriceComparatorPage] Starting initMetadata...');
     setIsMetadataLoading(true);
     try {
+      console.log('[CloudPriceComparatorPage] Awaiting loadProviderMetadata()...');
       await loadProviderMetadata();
       console.log('[CloudPriceComparatorPage] loadProviderMetadata finished successfully.');
 
       const gcpGeos = getGeosForProvider('Google Cloud');
-      console.log('[CloudPriceComparatorPage] GCP Geos from getGeosForProvider:', gcpGeos.length);
+      console.log('[CloudPriceComparatorPage] GCP Geos from getGeosForProvider:', gcpGeos);
       setGoogleGeoOptions(gcpGeos);
 
       const azGeos = getGeosForProvider('Azure');
-      console.log('[CloudPriceComparatorPage] Azure Geos from getGeosForProvider:', azGeos.length);
+      console.log('[CloudPriceComparatorPage] Azure Geos from getGeosForProvider:', azGeos);
       setAzureGeoOptions(azGeos);
 
       const awsGeos = getGeosForProvider('AWS');
-      console.log('[CloudPriceComparatorPage] AWS Geos from getGeosForProvider:', awsGeos.length);
+      console.log('[CloudPriceComparatorPage] AWS Geos from getGeosForProvider:', awsGeos);
       setAwsGeoOptions(awsGeos);
       
       setGooglePricingModelOptions(getPricingModelsForProvider('Google Cloud'));
@@ -118,6 +120,8 @@ export default function CloudPriceComparatorPage() {
       setAwsPricingModelOptions(getPricingModelsForProvider('AWS'));
 
       console.log('[CloudPriceComparatorPage] Geo and pricing model options set.');
+      console.log(`[CloudPriceComparatorPage] Google Geo Options Populated: ${gcpGeos.length > 0}, Azure: ${azGeos.length > 0}, AWS: ${awsGeos.length > 0}`);
+
 
     } catch (error) {
       console.error("[CloudPriceComparatorPage] CRITICAL: Failed to initialize metadata in component:", error);
@@ -131,11 +135,11 @@ export default function CloudPriceComparatorPage() {
       console.log('[CloudPriceComparatorPage] Setting isMetadataLoading to false in finally block.');
       setIsMetadataLoading(false);
     }
-  }, [toast]);
+  }, [toast]); // toast is a stable dependency from useToast
 
   useEffect(() => {
     initMetadata();
-  }, [initMetadata]);
+  }, [initMetadata]); // initMetadata is now stable due to useCallback
 
 
  useEffect(() => {
@@ -166,7 +170,7 @@ export default function CloudPriceComparatorPage() {
     setGoogleInstanceOptions([]); setSelectedGoogleInstance('');
     setGoogleCpuDetails(null); setGoogleSapsRating(null); setGooglePriceData(null);
 
-    if (selectedGoogleGeo && !isMetadataLoading) {
+    if (selectedGoogleGeo && !isMetadataLoading && googleGeoOptions.length > 0) {
       const regions = getRegionsForProvider('Google Cloud', selectedGoogleGeo);
       setGoogleRegionOptions(regions);
       if (regions.length > 0) {
@@ -178,7 +182,7 @@ export default function CloudPriceComparatorPage() {
         }
       }
     }
-  }, [selectedGoogleGeo, isMetadataLoading]);
+  }, [selectedGoogleGeo, isMetadataLoading, googleGeoOptions]);
 
   useEffect(() => {
     setAzureRegionOptions([]); setSelectedAzureRegion('');
@@ -186,7 +190,7 @@ export default function CloudPriceComparatorPage() {
     setAzureInstanceOptions([]); setSelectedAzureInstance('');
     setAzureCpuDetails(null); setAzureSapsRating(null); setAzurePriceData(null);
 
-    if (selectedAzureGeo && !isMetadataLoading) {
+    if (selectedAzureGeo && !isMetadataLoading && azureGeoOptions.length > 0) {
       const regions = getRegionsForProvider('Azure', selectedAzureGeo);
       setAzureRegionOptions(regions);
       if (regions.length > 0) {
@@ -198,7 +202,7 @@ export default function CloudPriceComparatorPage() {
         }
       }
     }
-  }, [selectedAzureGeo, isMetadataLoading]);
+  }, [selectedAzureGeo, isMetadataLoading, azureGeoOptions]);
 
   useEffect(() => {
     setAwsRegionOptions([]); setSelectedAwsRegion('');
@@ -206,7 +210,7 @@ export default function CloudPriceComparatorPage() {
     setAwsInstanceOptions([]); setSelectedAwsInstance('');
     setAwsCpuDetails(null); setAwsSapsRating(null); setAwsPriceData(null);
 
-    if (selectedAwsGeo && !isMetadataLoading) {
+    if (selectedAwsGeo && !isMetadataLoading && awsGeoOptions.length > 0) {
       const regions = getRegionsForProvider('AWS', selectedAwsGeo);
       setAwsRegionOptions(regions);
       if (regions.length > 0) {
@@ -218,7 +222,7 @@ export default function CloudPriceComparatorPage() {
         }
       }
     }
-  }, [selectedAwsGeo, isMetadataLoading]);
+  }, [selectedAwsGeo, isMetadataLoading, awsGeoOptions]);
 
   const parsedCustomCpu = customCpu ? parseInt(customCpu) : undefined;
   const parsedCustomRam = customRam ? parseInt(customRam) : undefined;

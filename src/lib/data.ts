@@ -28,11 +28,11 @@ export async function loadProviderMetadata(): Promise<void> {
   }
 
   metadataLoadingPromise = (async () => {
-    console.log("[Metadata] Attempting to load provider metadata using Firebase getDownloadURL()...");
+    console.log("[Metadata] Attempting to load provider metadata from Firebase Storage...");
     if (!storage) {
       console.error("[Metadata] CRITICAL: Firebase Storage instance is not available. Check Firebase initialization in src/lib/firebase.ts and your .env configuration.");
-      metadataLoaded = false;
-      metadataLoadingPromise = null;
+      metadataLoaded = false; // Ensure it's marked as not loaded
+      metadataLoadingPromise = null; // Clear the promise so retry is possible
       throw new Error("Firebase Storage not initialized. Cannot load metadata.");
     } else {
       console.log("[Metadata] Firebase Storage instance appears to be available.");
@@ -42,6 +42,7 @@ export async function loadProviderMetadata(): Promise<void> {
       const results = await Promise.all(
         metadataFileNames.map(async (fileName) => {
           const filePath = `metadata/${fileName}`;
+          console.log(`[Metadata] Processing ${fileName} (path: ${filePath})`);
           let downloadURL = '';
           try {
             console.log(`[Metadata] Getting ref for: ${filePath}`);
@@ -52,31 +53,37 @@ export async function loadProviderMetadata(): Promise<void> {
 
             console.log(`[Metadata] Fetching ${fileName} from: ${downloadURL}`);
             const response = await fetch(downloadURL, { cache: 'no-store' });
+            
             if (!response.ok) {
               const errorText = await response.text();
-              console.error(`[Metadata] Failed to fetch ${fileName} (via downloadURL ${downloadURL}). Status: ${response.status} ${response.statusText}. Response: ${errorText}`);
+              console.error(`[Metadata] Failed to fetch ${fileName} (URL: ${downloadURL}). Status: ${response.status} ${response.statusText}. Response: ${errorText}`);
               throw new Error(`Failed to fetch ${fileName} (status ${response.status}). URL: ${downloadURL}`);
             }
-            console.log(`[Metadata] Successfully fetched ${fileName}. Attempting to parse JSON.`);
+            console.log(`[Metadata] Successfully fetched ${fileName}. Status: ${response.status}. Attempting to parse JSON.`);
             const jsonData = await response.json();
             console.log(`[Metadata] Successfully parsed JSON for ${fileName}.`);
             return jsonData;
           } catch (fileError: any) {
-            let errorMessage = `[Metadata] Error processing ${fileName}. `;
-            if (fileError.message.includes('storage/object-not-found')) {
-              errorMessage += `File not found at path '${filePath}' in Firebase Storage. Please verify the file exists.`;
-            } else if (fileError.message.includes('storage/unauthorized')) {
-              errorMessage += `Unauthorized to access '${filePath}' in Firebase Storage. Check Firebase Storage rules.`;
-            } else if (fileError.message.includes('Failed to fetch')) {
-               errorMessage += `Network error or issue with download URL for '${filePath}'. URL was: ${downloadURL || 'not yet generated'}. Details: ${fileError.message}`;
-            } else if (fileError instanceof SyntaxError) {
-              errorMessage += `Malformed JSON in file '${fileName}'. Details: ${fileError.message}`;
+            let errorMessage = `[Metadata] Error processing ${fileName}. Path: '${filePath}'. `;
+            if (downloadURL) {
+              errorMessage += `Attempted Download URL: '${downloadURL}'. `;
             }
-            else {
+            if (fileError.message.includes('storage/object-not-found')) {
+              errorMessage += `FILE NOT FOUND in Firebase Storage. Please verify the file exists at this exact path and that Storage Rules allow access.`;
+            } else if (fileError.message.includes('storage/unauthorized')) {
+              errorMessage += `UNAUTHORIZED to access file in Firebase Storage. Check Firebase Storage rules. Your rules should permit reads (e.g., 'allow read;').`;
+            } else if (fileError.message.includes('Failed to fetch')) {
+               errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status.`;
+            } else if (fileError instanceof SyntaxError) { // Error during response.json()
+              errorMessage += `MALFORMED JSON in file '${fileName}'. Please validate the JSON content.`;
+            } else {
               errorMessage += `Details: ${fileError.message}`;
             }
             console.error(errorMessage, fileError);
-            throw new Error(`Could not load ${fileName}. ${fileError.message}`);
+            // To ensure Promise.all settles and doesn't hide other errors, we re-throw a more specific error.
+            // Or, you could return a specific error object/marker for this file if you want to handle partial failures.
+            // For now, re-throwing to make the overall metadata load fail clearly.
+            throw new Error(`Could not load or parse ${fileName}. ${errorMessage}`);
           }
         })
       );
@@ -87,17 +94,21 @@ export async function loadProviderMetadata(): Promise<void> {
       machineFamilies = (results[3] as MachineFamily[] || []);
 
       metadataLoaded = true;
-      console.log("[Metadata] Provider metadata fetching using Firebase getDownloadURL() successful.");
+      console.log("[Metadata] Provider metadata fetching from Firebase Storage successful.");
       console.log(`[Metadata] Loaded ${googleCloudRegions.length} GCP regions, ${azureRegions.length} Azure regions, ${awsRegions.length} AWS regions, ${machineFamilies.length} machine families.`);
+    
     } catch (error: any) {
-      console.error("[Metadata] CRITICAL ERROR during metadata loading process:", error.message);
+      console.error("[Metadata] CRITICAL OVERALL ERROR during metadata loading process:", error.message, error);
+      // Reset all, as metadata is incomplete/corrupted
       googleCloudRegions = [];
       azureRegions = [];
       awsRegions = [];
       machineFamilies = [];
-      metadataLoaded = false;
-      metadataLoadingPromise = null;
-      throw error;
+      metadataLoaded = false; 
+      // Do not clear metadataLoadingPromise here, let it remain as a settled (rejected) promise
+      // This prevents re-triggering if multiple components call it quickly after a failure.
+      // A full page reload or a manual retry mechanism would be needed to try loading again.
+      throw error; // Re-throw to ensure the caller knows metadata loading failed.
     }
   })();
   return metadataLoadingPromise;
@@ -106,7 +117,7 @@ export async function loadProviderMetadata(): Promise<void> {
 
 export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   if (!metadataLoaded) {
-    console.warn(`[MetadataAccess] getGeosForProvider called before metadata was successfully loaded or after a loading failure. Provider: ${provider}`);
+    console.warn(`[MetadataAccess] getGeosForProvider called before metadata was successfully loaded or after a loading failure. Provider: ${provider}. Returning empty array.`);
   }
   let regions: Region[] = [];
   if (provider === 'Google Cloud') regions = googleCloudRegions;
@@ -114,7 +125,7 @@ export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   else if (provider === 'AWS') regions = awsRegions;
 
   if (!regions || regions.length === 0) {
-    console.warn(`[MetadataAccess] No regions array found for provider ${provider} in getGeosForProvider. Metadata might be missing or failed to load.`);
+    // console.warn(`[MetadataAccess] No regions array found for provider ${provider} in getGeosForProvider. Metadata might be missing or failed to load.`);
     return [];
   }
   const geos = Array.from(new Set(regions.map(r => r.geo)));
@@ -123,7 +134,7 @@ export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
 
 export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Region[] => {
   if (!metadataLoaded) {
-    console.warn(`[MetadataAccess] getRegionsForProvider called before metadata was successfully loaded or after a loading failure. Provider: ${provider}, Geo: ${geo}`);
+    console.warn(`[MetadataAccess] getRegionsForProvider called before metadata was successfully loaded or after a loading failure. Provider: ${provider}, Geo: ${geo}. Returning empty array.`);
   }
   let allRegions: Region[] = [];
   if (provider === 'Google Cloud') allRegions = googleCloudRegions;
@@ -131,7 +142,7 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   else if (provider === 'AWS') allRegions = awsRegions;
 
   if (!allRegions || allRegions.length === 0) {
-    console.warn(`[MetadataAccess] No regions array found for provider ${provider} in getRegionsForProvider (geo: ${geo}).`);
+    // console.warn(`[MetadataAccess] No regions array found for provider ${provider} in getRegionsForProvider (geo: ${geo}).`);
     return [];
   }
 
@@ -145,9 +156,9 @@ export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | 
   let cpuCount: number | null = null;
   if (machine.cpu) {
     if (machine.cpu.toLowerCase().includes('shared')) {
-      cpuCount = 0.5;
+      cpuCount = 0.5; // Represent shared vCPUs as 0.5 for filtering logic
     } else {
-      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/);
+      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/); // Match integer or decimal
       if (cpuMatch && cpuMatch[1]) {
         cpuCount = parseFloat(cpuMatch[1]);
       }
@@ -171,10 +182,10 @@ export const getMachineFamilyGroups = (
   filterSapCertified?: boolean, applyTolerance?: boolean
 ): SelectOption[] => {
   if (!metadataLoaded) {
-     console.warn(`[MetadataAccess] getMachineFamilyGroups called before metadata was successfully loaded or after a loading failure. Provider: ${provider}`);
+     console.warn(`[MetadataAccess] getMachineFamilyGroups called before metadata was successfully loaded or after a loading failure. Provider: ${provider}. Returning empty array.`);
   }
   if (!machineFamilies || machineFamilies.length === 0) {
-    console.warn(`[MetadataAccess] No machine families loaded for provider ${provider} in getMachineFamilyGroups.`);
+    // console.warn(`[MetadataAccess] No machine families loaded for provider ${provider} in getMachineFamilyGroups.`);
     return [];
   }
 
@@ -187,22 +198,23 @@ export const getMachineFamilyGroups = (
   if (minCpu !== undefined || userMinRamGB !== undefined) {
     filteredMachines = filteredMachines.filter(mf => {
       const specs = parseMachineSpecs(mf);
+      
       let cpuMatch = true;
       if (minCpu !== undefined && specs.cpuCount !== null) {
         const lowerBoundCpu = filterSapCertified && applyTolerance ? minCpu * 0.85 : minCpu;
-        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
+        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity; // No upper bound if not tolerating
         cpuMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
-      } else if (minCpu !== undefined && specs.cpuCount === null) {
-         cpuMatch = minCpu <= 0;
+      } else if (minCpu !== undefined && specs.cpuCount === null) { // If filter is set but machine has no CPU spec
+         cpuMatch = minCpu <= 0; // Only match if filter is 0 or less (effectively no filter for CPU > 0)
       }
 
       let ramMatch = true;
       if (userMinRamGB !== undefined && specs.ramInGB !== null) {
         const lowerBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 0.85 : userMinRamGB;
-        const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity;
+        const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity; // No upper bound if not tolerating
         ramMatch = specs.ramInGB >= lowerBoundRam && specs.ramInGB <= upperBoundRam;
-      } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
-        ramMatch = userMinRamGB <= 0;
+      } else if (userMinRamGB !== undefined && specs.ramInGB === null) { // If filter is set but machine has no RAM spec
+        ramMatch = userMinRamGB <=0; // Only match if filter is 0 or less
       }
       return cpuMatch && ramMatch;
     });
@@ -217,10 +229,10 @@ export const getMachineInstancesForFamily = (
   minCpu?: number, userMinRamGB?: number, applyTolerance?: boolean
 ): MachineFamily[] => {
   if (!metadataLoaded) {
-    console.warn(`[MetadataAccess] getMachineInstancesForFamily called before metadata was successfully loaded or after a loading failure. Provider: ${provider}, Family: ${familyGroup}`);
+    console.warn(`[MetadataAccess] getMachineInstancesForFamily called before metadata was successfully loaded or after a loading failure. Provider: ${provider}, Family: ${familyGroup}. Returning empty array.`);
   }
    if (!machineFamilies || machineFamilies.length === 0) {
-    console.warn(`[MetadataAccess] No machine families loaded for provider ${provider} in getMachineInstancesForFamily.`);
+    // console.warn(`[MetadataAccess] No machine families loaded for provider ${provider} in getMachineInstancesForFamily.`);
     return [];
   }
 
@@ -236,7 +248,7 @@ export const getMachineInstancesForFamily = (
        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
        cpuFilterMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
     } else if (minCpu !== undefined && specs.cpuCount === null) {
-       cpuFilterMatch = minCpu <= 0;
+       cpuFilterMatch = minCpu <= 0; 
     }
 
     let ramFilterMatch = true;
@@ -277,13 +289,14 @@ export const getMachineInstancesForFamily = (
             }
             const comparison = aPart.localeCompare(bPart);
             if (comparison !== 0) return comparison;
-          } else {
+          } else { // One is number, other is string, sort numbers first
             return typeof aPart === 'number' ? -1 : 1;
           }
         }
         return aParts.length - bParts.length;
     });
 };
+
 
 export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
@@ -352,7 +365,7 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
 
 const getInstanceFullDescription = (provider: CloudProvider, instanceId: string): string => {
   if (!metadataLoaded) {
-      console.warn(`[MetadataAccess] getInstanceFullDescription called before metadata loaded for instance: ${instanceId}, provider: ${provider}`);
+      console.warn(`[MetadataAccess] getInstanceFullDescription called before metadata loaded for instance: ${instanceId}, provider: ${provider}. Returning default description.`);
   }
   const mf = machineFamilies.find(m => m.id === instanceId && m.provider === provider);
   return mf ? mf.fullDescription : `${provider} Instance ${instanceId} (Details not found - metadata may not be loaded yet)`;
@@ -360,7 +373,7 @@ const getInstanceFullDescription = (provider: CloudProvider, instanceId: string)
 
 export const getRegionNameById = (provider: CloudProvider, regionId: string): string => {
   if (!metadataLoaded) {
-      console.warn(`[MetadataAccess] getRegionNameById called before metadata loaded for region: ${regionId}, provider: ${provider}`);
+      console.warn(`[MetadataAccess] getRegionNameById called before metadata loaded for region: ${regionId}, provider: ${provider}. Returning default name.`);
   }
   let regions: Region[] = [];
   if (provider === 'Google Cloud') regions = googleCloudRegions;
@@ -374,26 +387,40 @@ export const getPricingModelDetails = (modelValue: string): PricingModel | undef
   return pricingModelOptions.find(m => m.value === modelValue);
 };
 
+
 export const fetchPricingData = async (
   provider: CloudProvider,
   regionId: string,
   instanceId: string,
   pricingModelValue: string
 ): Promise<PriceData> => {
-  if (!metadataLoaded && !metadataLoadingPromise) { // If not loaded and not even trying to load
-    console.warn("[Pricing] Metadata not loaded and not being loaded. Attempting to load metadata first in fetchPricingData.");
-    try {
-        await loadProviderMetadata(); // This will set metadataLoadingPromise
-    } catch (error) {
-        console.error("[Pricing] Failed to initiate metadata loading in fetchPricingData. Pricing will be unavailable.", error);
+  // Ensure metadata is loaded or loading is awaited if not already done.
+  if (!metadataLoaded) {
+    if (metadataLoadingPromise) {
+      console.log("[PricingData] Metadata loading is in progress. Awaiting completion before fetching pricing data...");
+      await metadataLoadingPromise;
+    } else {
+      console.warn("[PricingData] Metadata not loaded and no loading promise found. Attempting to load metadata first.");
+      try {
+        await loadProviderMetadata();
+      } catch (error) {
+        console.error("[PricingData] CRITICAL: Failed to load metadata in fetchPricingData. Pricing will be unavailable.", error);
+        // Construct a default/error PriceData object
+        const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
+        return {
+          provider, machineFamilyId: instanceId, machineFamilyName: `Error loading: ${instanceId}`, price: null,
+          regionId, regionName: `Error loading: ${regionId}`, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
+        };
+      }
     }
-  } else if (metadataLoadingPromise && !metadataLoaded) { // If loading is in progress
-     console.log("[Pricing] Metadata loading is in progress. Awaiting completion before fetching pricing data...");
-     try {
-        await metadataLoadingPromise; // Wait for the existing loading process to finish
-     } catch (error) {
-        console.error("[Pricing] Error occurred during metadata loading (awaited in fetchPricingData). Pricing will be unavailable.", error);
-     }
+  }
+  if (!metadataLoaded) { // Check again after potential load attempt
+      console.error(`[PricingData] Metadata still not loaded after attempt for provider ${provider}, instance ${instanceId}. Pricing will be unavailable.`);
+      const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
+      return {
+          provider, machineFamilyId: instanceId, machineFamilyName: `Metadata load failed: ${instanceId}`, price: null,
+          regionId, regionName: `Metadata load failed: ${regionId}`, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
+      };
   }
 
 
@@ -410,55 +437,62 @@ export const fetchPricingData = async (
   else if (provider === 'AWS') gcsFolderPathSegment = 'EC2';
 
   if (!gcsFolderPathSegment) {
-    console.error(`[Pricing] No GCS folder path segment defined for provider ${provider}. Cannot fetch pricing.`);
+    console.error(`[PricingData] No GCS folder path segment defined for provider ${provider}. Cannot fetch pricing for ${instanceId}.`);
     return {
       provider, machineFamilyId: instanceId, machineFamilyName, price: null,
       regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
     };
   }
 
-  const safeInstanceId = instanceId; // Already used as file names
-  const safePricingModelValue = pricingModelValue; // Already used as file names
-  const safeRegionId = regionId; // Already used as folder names
-
-  const pricingFilePath = `${gcsFolderPathSegment}/${safeRegionId}/${safeInstanceId}/${safePricingModelValue}.json`;
-  console.log(`[Pricing] Attempting to get download URL for Firebase Storage path: ${pricingFilePath}`);
+  // Instance IDs from machineFamilies.json are already "safe" for GCS paths.
+  // Pricing model values are also simple strings.
+  // Region IDs are also simple strings.
+  const pricingFilePath = `${gcsFolderPathSegment}/${regionId}/${instanceId}/${pricingModelValue}.json`;
+  
   let downloadURL = '';
 
   try {
+    if (!storage) {
+      throw new Error("Firebase Storage instance is not available in fetchPricingData. Check Firebase initialization.");
+    }
     const pricingFileRef = ref(storage, pricingFilePath);
+    console.log(`[PricingData] Getting download URL for ${provider} price: ${pricingFilePath}`);
     downloadURL = await getDownloadURL(pricingFileRef);
-    console.log(`[Pricing] Fetching ${provider} pricing data for ${instanceId} from: ${downloadURL}`);
+    console.log(`[PricingData] Fetching ${provider} pricing for ${instanceId} from: ${downloadURL}`);
+    
     const response = await fetch(downloadURL, { cache: 'no-store' });
 
     if (!response.ok) {
-      const responseText = await response.text(); // Read error response
-      console.error(`[Pricing] HTTP error fetching ${provider} pricing for ${instanceId} (via ${downloadURL}): ${response.status} ${response.statusText}. Response: ${responseText}`);
+      const responseText = await response.text();
+      console.error(`[PricingData] HTTP error fetching ${provider} pricing for ${instanceId} (Path: ${pricingFilePath}, URL: ${downloadURL}): ${response.status} ${response.statusText}. Response: ${responseText}`);
     } else {
       const pricingDataObject: { hourlyPrice?: number; [key: string]: any } = await response.json();
       if (pricingDataObject && typeof pricingDataObject.hourlyPrice === 'number') {
         price = parseFloat(Math.max(0.000001, pricingDataObject.hourlyPrice).toFixed(6));
+        console.log(`[PricingData] Successfully fetched and parsed price for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${price}`);
       } else {
-        console.warn(`[Pricing] Hourly price not found or not a number in ${provider} data for ${instanceId} from ${downloadURL}. Received data:`, pricingDataObject);
+        console.warn(`[PricingData] Hourly price not found or not a number in ${provider} data for ${instanceId} (Path: ${pricingFilePath}, URL: ${downloadURL}). Received data:`, pricingDataObject);
       }
     }
   } catch (error: any) {
-    let errorMessage = `[Pricing] Error processing pricing for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}). Path: '${pricingFilePath}'. `;
+    let errorMessage = `[PricingData] Error processing pricing for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}). Path: '${pricingFilePath}'. `;
+     if (downloadURL) {
+        errorMessage += `Attempted Download URL: '${downloadURL}'. `;
+    }
     if (error.message.includes('storage/object-not-found')) {
-      errorMessage += `File not found. Please verify the file exists in Firebase Storage.`;
+      errorMessage += `FILE NOT FOUND in Firebase Storage. Please verify the file exists at this exact path and that Storage Rules allow access.`;
     } else if (error.message.includes('storage/unauthorized')) {
-      errorMessage += `Unauthorized. Check Firebase Storage rules.`;
+      errorMessage += `UNAUTHORIZED to access file in Firebase Storage. Check Firebase Storage rules. Your rules should permit reads (e.g., 'allow read;').`;
     } else if (error.message.includes('Failed to fetch')) {
-       errorMessage += `Network error or issue with download URL. URL was: ${downloadURL || 'not yet generated'}. Details: ${error.message}`;
-    } else if (error instanceof SyntaxError) {
-       errorMessage += `Malformed JSON in pricing file. Details: ${error.message}`;
+       errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status.`;
+    } else if (error instanceof SyntaxError) { // Error during response.json()
+       errorMessage += `MALFORMED JSON in pricing file. Please validate the JSON content.`;
     } else {
       errorMessage += `Details: ${error.message}`;
     }
     console.error(errorMessage, error);
   }
-
-  console.log(`[Pricing] Result for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}, label: ${modelDetails.label}): Price = ${price}`);
+  
   return {
     provider,
     machineFamilyId: instanceId,
