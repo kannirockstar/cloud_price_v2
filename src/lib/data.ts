@@ -50,7 +50,7 @@ export async function loadProviderMetadata(): Promise<void> {
             downloadURL = await getDownloadURL(fileRef);
             console.log(`[Metadata] Successfully got downloadURL for ${fileName}: ${downloadURL}`);
 
-            console.log(`[Metadata] Attempting to fetch ${fileName} using downloadURL: ${downloadURL}`); // Added log
+            console.log(`[Metadata] Attempting to fetch ${fileName} using downloadURL: ${downloadURL}`);
             const response = await fetch(downloadURL, { cache: 'no-store' });
             
             if (!response.ok) {
@@ -77,20 +77,21 @@ export async function loadProviderMetadata(): Promise<void> {
               errorMessage += `FILE NOT FOUND in Firebase Storage at path '${filePath}'. Please verify the file exists. Bucket: '${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}'.`;
             } else if (fileError.message.includes('storage/unauthorized') || (fileError.code && fileError.code === 'storage/unauthorized')) {
               errorMessage += `UNAUTHORIZED to access file '${filePath}' in Firebase Storage (e.g. via getDownloadURL). Check Firebase Storage rules (storage.rules). They might be denying read access.`;
-            } else if (fileError.message.includes('Failed to fetch')) {
-               errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status. The browser could not complete the fetch request. This could be due to:
-    - No internet connection.
-    - DNS resolution failure for '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
-    - A firewall, VPN, or browser extension (like an ad-blocker) blocking the request.
-    - The Firebase Storage service itself might be temporarily unavailable (check Firebase status page).
-    - If a downloadURL was obtained, it might have expired or been malformed, although this is less likely for short-lived operations.`;
+            } else if (fileError.message.toLowerCase().includes('failed to fetch')) {
+               errorMessage += `NETWORK ERROR ("Failed to fetch") or issue with download URL. The browser could not complete the network request. This could be due to:
+    - No internet connection or unstable connection.
+    - DNS resolution failure for the host: '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
+    - **Cloud Workstations Network Policy:** Egress (outbound) network policies on your Cloud Workstation might be blocking access to external URLs like Firebase Storage. Check your workstation's or organization's network configuration.
+    - Local firewall, VPN, or proxy settings on your machine or network.
+    - Browser extensions (like ad-blockers or privacy tools) interfering.
+    - The Firebase Storage service itself might be temporarily unavailable (check Firebase status page).`;
             } else if (fileError instanceof SyntaxError) { 
               errorMessage += `MALFORMED JSON in file '${fileName}'. Please validate the JSON content.`;
-            } else if (fileError.message.includes('Firebase Storage:')) { // Catch other Firebase specific errors
+            } else if (fileError.message.includes('Firebase Storage:')) { 
               errorMessage += `FIREBASE STORAGE SDK ERROR: ${fileError.message} (Code: ${fileError.code || 'N/A'}). This could be an issue with initialization, permissions, or the file itself.`;
             }
             else {
-              errorMessage += `Details: ${fileError.message}. Code: ${fileError.code || 'N/A'}`;
+              errorMessage += `Details: ${fileError.message}. Full error object: ${JSON.stringify(fileError)}. Code: ${fileError.code || 'N/A'}`;
             }
             console.error(errorMessage, fileError);
             throw new Error(`Could not load or parse ${fileName}. ${errorMessage}`);
@@ -462,7 +463,7 @@ export const fetchPricingData = async (
     const pricingFileRef = ref(storage, pricingFilePath);
     console.log(`[PricingData] Getting download URL for ${provider} price: ${pricingFilePath}`);
     downloadURL = await getDownloadURL(pricingFileRef);
-    console.log(`[PricingData] Fetching ${provider} pricing for ${instanceId} from download URL: ${downloadURL}`); // Added log
+    console.log(`[PricingData] Fetching ${provider} pricing for ${instanceId} from download URL: ${downloadURL}`); 
     
     const response = await fetch(downloadURL, { cache: 'no-store' });
 
@@ -489,24 +490,25 @@ export const fetchPricingData = async (
      if (downloadURL) {
         errorMessage += `Attempted Download URL: '${downloadURL}'. `;
     }
-    if (error.message.includes('storage/object-not-found') || (error.code && error.code === 'storage/object-not-found')) {
+    if (error.message.toLowerCase().includes('failed to fetch')) {
+        errorMessage += `NETWORK ERROR ("Failed to fetch") or issue with download URL. The browser could not complete the network request. This could be due to:
+    - No internet connection or unstable connection.
+    - DNS resolution failure for the host: '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
+    - **Cloud Workstations Network Policy:** Egress (outbound) network policies on your Cloud Workstation might be blocking access to external URLs like Firebase Storage. Check your workstation's or organization's network configuration.
+    - Local firewall, VPN, or proxy settings on your machine or network.
+    - Browser extensions (like ad-blockers or privacy tools) interfering.
+    - The Firebase Storage service itself might be temporarily unavailable (check Firebase status page).`;
+    } else if (error.message.includes('storage/object-not-found') || (error.code && error.code === 'storage/object-not-found')) {
       errorMessage += `FILE NOT FOUND in Firebase Storage at path '${pricingFilePath}'. Please verify the file exists and the path is correct. Bucket: '${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}'.`;
     } else if (error.message.includes('storage/unauthorized') || (error.code && error.code === 'storage/unauthorized')) {
       errorMessage += `UNAUTHORIZED to access file '${pricingFilePath}' in Firebase Storage (e.g. via getDownloadURL). Check Firebase Storage rules (storage.rules). They might be denying read access.`;
-    } else if (error.message.includes('Failed to fetch')) {
-       errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status. The browser could not complete the fetch request. This could be due to:
-    - No internet connection.
-    - DNS resolution failure for '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
-    - A firewall, VPN, or browser extension (like an ad-blocker) blocking the request.
-    - The Firebase Storage service itself might be temporarily unavailable (check Firebase status page).
-    - If a downloadURL was obtained, it might have expired or been malformed, although this is less likely for short-lived operations.`;
     } else if (error instanceof SyntaxError) { 
        errorMessage += `MALFORMED JSON in pricing file '${pricingFilePath}'. Please validate the JSON content.`;
-    } else if (error.message.includes('Firebase Storage:')) { // Catch other Firebase specific errors
+    } else if (error.message.includes('Firebase Storage:')) { 
       errorMessage += `FIREBASE STORAGE SDK ERROR: ${error.message} (Code: ${error.code || 'N/A'}). This could be an issue with initialization, permissions, or the file itself.`;
     }
     else {
-      errorMessage += `Details: ${error.message}. Code: ${error.code || 'N/A'}`;
+      errorMessage += `Details: ${error.message}. Full error object: ${JSON.stringify(error)}. Code: ${error.code || 'N/A'}`;
     }
     console.error(errorMessage, error);
   }

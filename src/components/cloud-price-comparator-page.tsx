@@ -126,17 +126,17 @@ export default function CloudPriceComparatorPage() {
     } catch (error: any) {
       console.error("[CloudPriceComparatorPage] CRITICAL: Failed to initialize metadata in component:", error);
       let toastTitle = "Metadata Initialization Error";
-      let toastDescription = "Could not load essential configuration data. Dropdowns may be empty or non-functional. Please check browser console for detailed error messages from 'src/lib/data.ts' and verify Firebase setup.";
+      let toastDescription = `Could not load essential configuration data. Dropdowns may be empty or non-functional. Error: ${error.message}. Please check browser console for detailed error messages from 'src/lib/data.ts' and verify Firebase setup.`;
       
       if (error && error.message) {
-        if (error.message.includes("NETWORK ERROR or issue with download URL") || error.message.toLowerCase().includes("failed to fetch")) {
+        if (error.message.toLowerCase().includes("failed to fetch") || error.message.includes("NETWORK ERROR")) {
           toastTitle = "Network Error Fetching Metadata";
-          toastDescription = `Failed to download essential configuration files. This is usually due to a client-side network issue. Please check:
-1. Your internet connection.
-2. Any firewall, VPN, or proxy settings.
-3. Browser extensions (try disabling ad-blockers or privacy tools).
-4. DNS resolution for 'firebasestorage.googleapis.com'.
-5. For more details, open your browser's developer console (F12 -> Console). The console contains specific error messages about which file failed and why.`;
+          toastDescription = `Failed to download essential configuration files due to a network issue. This is often caused by:
+1. Your internet connection or local DNS issues.
+2. **Cloud Workstations Network Policy:** Egress (outbound) policies might be blocking Firebase Storage. Check your workstation's network configuration.
+3. Firewall, VPN, or proxy settings on your machine/network.
+4. Browser extensions (e.g., ad-blockers). Try disabling them.
+5. For more details, open your browser's developer console (F12 -> Console).`;
         } else if (error.message.includes("FILE NOT FOUND")) {
           toastDescription = "Configuration Error: A required metadata file was not found in Firebase Storage. Please ensure all metadata files are correctly uploaded. See console for details.";
         } else if (error.message.includes("UNAUTHORIZED")) {
@@ -150,7 +150,7 @@ export default function CloudPriceComparatorPage() {
         variant: "destructive",
         title: toastTitle,
         description: toastDescription,
-        duration: 15000, // Increased duration for more detailed message
+        duration: 20000, 
       });
     } finally {
       console.log('[CloudPriceComparatorPage] Setting isMetadataLoading to false in finally block.');
