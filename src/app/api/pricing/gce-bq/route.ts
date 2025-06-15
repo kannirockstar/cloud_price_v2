@@ -23,16 +23,16 @@ export async function GET(request: NextRequest) {
 
   // IMPORTANT: Adjust the SQL query to match your actual table schema and column names
   // This query assumes your table has 'hourly_price' and columns for filtering.
-  const query = \`
+  const query = `
     SELECT
       hourly_price AS price
-    FROM \`\${PROJECT_ID}.\${DATASET_ID}.\${TABLE_ID}\`
+    FROM \`${PROJECT_ID}.${DATASET_ID}.${TABLE_ID}\`
     WHERE
       region_id = @regionId
       AND instance_id = @instanceId
       AND pricing_model_value = @pricingModelValue
     LIMIT 1;
-  \`;
+  `;
 
   const options = {
     query: query,
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     if (rows.length > 0 && rows[0].price !== null && typeof rows[0].price === 'number') {
       price = parseFloat(Math.max(0.000001, rows[0].price).toFixed(6));
     } else if (rows.length > 0) {
-        console.warn(\`[GCE BQ API] Price found for \${instanceId} in \${regionId} (model: \${pricingModelValue}) but was not a number or was null:\`, rows[0].price);
+        console.warn(`[GCE BQ API] Price found for ${instanceId} in ${regionId} (model: ${pricingModelValue}) but was not a number or was null:`, rows[0].price);
     }
 
 
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
     console.error('[GCE BQ API] Error querying BigQuery:', error);
     let errorMessage = 'Failed to fetch pricing data from BigQuery.';
     // if (error instanceof Error) { // Avoid sending raw error messages to client in prod
-    //     errorMessage += \` Details: \${error.message}\`;
+    //     errorMessage += \` Details: ${error.message}\`;
     // }
     return NextResponse.json({ error: errorMessage, details: (error as Error).message }, { status: 500 });
   }
