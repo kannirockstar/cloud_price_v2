@@ -1,4 +1,3 @@
-
 {
   "hosting": {
     "headers": [
@@ -12,5 +11,8 @@
         ]
       }
     ]
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
 }
