@@ -30,12 +30,12 @@ export async function loadProviderMetadata(): Promise<void> {
   metadataLoadingPromise = (async () => {
     console.log("[Metadata] Attempting to load provider metadata from Firebase Storage...");
     if (!storage) {
-      console.error("[Metadata] CRITICAL: Firebase Storage instance is not available. Check Firebase initialization in src/lib/firebase.ts and your .env configuration.");
-      metadataLoaded = false; // Ensure it's marked as not loaded
-      metadataLoadingPromise = null; // Clear the promise so retry is possible
+      console.error("[Metadata] CRITICAL: Firebase Storage instance is not available. Ensure NEXT_PUBLIC_FIREBASE_... variables are set in .env and Firebase is initialized in src/lib/firebase.ts.");
+      metadataLoaded = false; 
+      metadataLoadingPromise = null;
       throw new Error("Firebase Storage not initialized. Cannot load metadata.");
     } else {
-      console.log("[Metadata] Firebase Storage instance appears to be available.");
+      console.log("[Metadata] Firebase Storage instance confirmed available.");
     }
 
     try {
@@ -56,8 +56,14 @@ export async function loadProviderMetadata(): Promise<void> {
             
             if (!response.ok) {
               const errorText = await response.text();
-              console.error(`[Metadata] Failed to fetch ${fileName} (URL: ${downloadURL}). Status: ${response.status} ${response.statusText}. Response: ${errorText}`);
-              throw new Error(`Failed to fetch ${fileName} (status ${response.status}). URL: ${downloadURL}`);
+              let detailMessage = `Failed to fetch ${fileName} (URL: ${downloadURL}). Status: ${response.status} ${response.statusText}. Response: ${errorText}`;
+              if (response.status === 403) {
+                detailMessage += ` A 403 error usually means Firebase Storage rules are denying access. Check your storage.rules. Ensure they allow public read for 'metadata/${fileName}' or 'metadata/**'. Current rules might be too restrictive.`;
+              } else if (response.status === 404) {
+                 detailMessage += ` A 404 error means the file was not found at the path '${filePath}' in your Firebase Storage bucket. Verify the file exists.`;
+              }
+              console.error(`[Metadata] ${detailMessage}`);
+              throw new Error(detailMessage);
             }
             console.log(`[Metadata] Successfully fetched ${fileName}. Status: ${response.status}. Attempting to parse JSON.`);
             const jsonData = await response.json();
@@ -68,21 +74,18 @@ export async function loadProviderMetadata(): Promise<void> {
             if (downloadURL) {
               errorMessage += `Attempted Download URL: '${downloadURL}'. `;
             }
-            if (fileError.message.includes('storage/object-not-found')) {
-              errorMessage += `FILE NOT FOUND in Firebase Storage. Please verify the file exists at this exact path and that Storage Rules allow access.`;
-            } else if (fileError.message.includes('storage/unauthorized')) {
-              errorMessage += `UNAUTHORIZED to access file in Firebase Storage. Check Firebase Storage rules. Your rules should permit reads (e.g., 'allow read;').`;
+            if (fileError.message.includes('storage/object-not-found') || (fileError.code && fileError.code === 'storage/object-not-found')) {
+              errorMessage += `FILE NOT FOUND in Firebase Storage at path '${filePath}'. Please verify the file exists.`;
+            } else if (fileError.message.includes('storage/unauthorized') || (fileError.code && fileError.code === 'storage/unauthorized')) {
+              errorMessage += `UNAUTHORIZED to access file '${filePath}' in Firebase Storage. Check Firebase Storage rules (storage.rules). They might be denying read access.`;
             } else if (fileError.message.includes('Failed to fetch')) {
-               errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status.`;
-            } else if (fileError instanceof SyntaxError) { // Error during response.json()
+               errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status. Also check CORS policy on the bucket if direct GCS URLs were previously used.`;
+            } else if (fileError instanceof SyntaxError) { 
               errorMessage += `MALFORMED JSON in file '${fileName}'. Please validate the JSON content.`;
             } else {
-              errorMessage += `Details: ${fileError.message}`;
+              errorMessage += `Details: ${fileError.message}. Code: ${fileError.code || 'N/A'}`;
             }
             console.error(errorMessage, fileError);
-            // To ensure Promise.all settles and doesn't hide other errors, we re-throw a more specific error.
-            // Or, you could return a specific error object/marker for this file if you want to handle partial failures.
-            // For now, re-throwing to make the overall metadata load fail clearly.
             throw new Error(`Could not load or parse ${fileName}. ${errorMessage}`);
           }
         })
@@ -98,17 +101,20 @@ export async function loadProviderMetadata(): Promise<void> {
       console.log(`[Metadata] Loaded ${googleCloudRegions.length} GCP regions, ${azureRegions.length} Azure regions, ${awsRegions.length} AWS regions, ${machineFamilies.length} machine families.`);
     
     } catch (error: any) {
-      console.error("[Metadata] CRITICAL OVERALL ERROR during metadata loading process:", error.message, error);
-      // Reset all, as metadata is incomplete/corrupted
+      console.error("[Metadata] CRITICAL OVERALL ERROR during metadata loading process (using getDownloadURL):", error.message, error);
+      if (error.message && error.message.includes("403")) {
+        console.error("[Metadata] 🔴 A 403 Forbidden error when using getDownloadURL often indicates your Firebase Storage rules are denying access. Please check your `storage.rules` file and ensure it allows public read access, for example: `rules_version = '2'; service firebase.storage { match /b/{bucket}/o { match /{allPaths=**} { allow read; allow write: if request.auth != null; /* or more restrictive */ } } }`");
+      } else if (error.message && error.message.includes("object-not-found")) {
+         console.error(`[Metadata] 🔴 An "object-not-found" error means a file (e.g., one of ${metadataFileNames.join(', ')}) was not found at the expected path in your Firebase Storage bucket ('metadata/' folder). Verify all metadata files are uploaded correctly.`);
+      } else if (error.message && error.message.includes("NEXT_PUBLIC_FIREBASE_")) {
+         console.error("[Metadata] 🔴 This error might be due to missing or incorrect Firebase configuration environment variables (NEXT_PUBLIC_FIREBASE_...). Please ensure your .env file is correctly set up and your Next.js server has been restarted.");
+      }
       googleCloudRegions = [];
       azureRegions = [];
       awsRegions = [];
       machineFamilies = [];
       metadataLoaded = false; 
-      // Do not clear metadataLoadingPromise here, let it remain as a settled (rejected) promise
-      // This prevents re-triggering if multiple components call it quickly after a failure.
-      // A full page reload or a manual retry mechanism would be needed to try loading again.
-      throw error; // Re-throw to ensure the caller knows metadata loading failed.
+      throw error; 
     }
   })();
   return metadataLoadingPromise;
@@ -125,7 +131,6 @@ export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   else if (provider === 'AWS') regions = awsRegions;
 
   if (!regions || regions.length === 0) {
-    // console.warn(`[MetadataAccess] No regions array found for provider ${provider} in getGeosForProvider. Metadata might be missing or failed to load.`);
     return [];
   }
   const geos = Array.from(new Set(regions.map(r => r.geo)));
@@ -142,7 +147,6 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   else if (provider === 'AWS') allRegions = awsRegions;
 
   if (!allRegions || allRegions.length === 0) {
-    // console.warn(`[MetadataAccess] No regions array found for provider ${provider} in getRegionsForProvider (geo: ${geo}).`);
     return [];
   }
 
@@ -156,9 +160,9 @@ export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | 
   let cpuCount: number | null = null;
   if (machine.cpu) {
     if (machine.cpu.toLowerCase().includes('shared')) {
-      cpuCount = 0.5; // Represent shared vCPUs as 0.5 for filtering logic
+      cpuCount = 0.5; 
     } else {
-      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/); // Match integer or decimal
+      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/); 
       if (cpuMatch && cpuMatch[1]) {
         cpuCount = parseFloat(cpuMatch[1]);
       }
@@ -185,7 +189,6 @@ export const getMachineFamilyGroups = (
      console.warn(`[MetadataAccess] getMachineFamilyGroups called before metadata was successfully loaded or after a loading failure. Provider: ${provider}. Returning empty array.`);
   }
   if (!machineFamilies || machineFamilies.length === 0) {
-    // console.warn(`[MetadataAccess] No machine families loaded for provider ${provider} in getMachineFamilyGroups.`);
     return [];
   }
 
@@ -202,19 +205,19 @@ export const getMachineFamilyGroups = (
       let cpuMatch = true;
       if (minCpu !== undefined && specs.cpuCount !== null) {
         const lowerBoundCpu = filterSapCertified && applyTolerance ? minCpu * 0.85 : minCpu;
-        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity; // No upper bound if not tolerating
+        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity; 
         cpuMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
-      } else if (minCpu !== undefined && specs.cpuCount === null) { // If filter is set but machine has no CPU spec
-         cpuMatch = minCpu <= 0; // Only match if filter is 0 or less (effectively no filter for CPU > 0)
+      } else if (minCpu !== undefined && specs.cpuCount === null) { 
+         cpuMatch = minCpu <= 0; 
       }
 
       let ramMatch = true;
       if (userMinRamGB !== undefined && specs.ramInGB !== null) {
         const lowerBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 0.85 : userMinRamGB;
-        const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity; // No upper bound if not tolerating
+        const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity; 
         ramMatch = specs.ramInGB >= lowerBoundRam && specs.ramInGB <= upperBoundRam;
-      } else if (userMinRamGB !== undefined && specs.ramInGB === null) { // If filter is set but machine has no RAM spec
-        ramMatch = userMinRamGB <=0; // Only match if filter is 0 or less
+      } else if (userMinRamGB !== undefined && specs.ramInGB === null) { 
+        ramMatch = userMinRamGB <=0; 
       }
       return cpuMatch && ramMatch;
     });
@@ -232,7 +235,6 @@ export const getMachineInstancesForFamily = (
     console.warn(`[MetadataAccess] getMachineInstancesForFamily called before metadata was successfully loaded or after a loading failure. Provider: ${provider}, Family: ${familyGroup}. Returning empty array.`);
   }
    if (!machineFamilies || machineFamilies.length === 0) {
-    // console.warn(`[MetadataAccess] No machine families loaded for provider ${provider} in getMachineInstancesForFamily.`);
     return [];
   }
 
@@ -289,7 +291,7 @@ export const getMachineInstancesForFamily = (
             }
             const comparison = aPart.localeCompare(bPart);
             if (comparison !== 0) return comparison;
-          } else { // One is number, other is string, sort numbers first
+          } else { 
             return typeof aPart === 'number' ? -1 : 1;
           }
         }
@@ -394,7 +396,6 @@ export const fetchPricingData = async (
   instanceId: string,
   pricingModelValue: string
 ): Promise<PriceData> => {
-  // Ensure metadata is loaded or loading is awaited if not already done.
   if (!metadataLoaded) {
     if (metadataLoadingPromise) {
       console.log("[PricingData] Metadata loading is in progress. Awaiting completion before fetching pricing data...");
@@ -405,7 +406,6 @@ export const fetchPricingData = async (
         await loadProviderMetadata();
       } catch (error) {
         console.error("[PricingData] CRITICAL: Failed to load metadata in fetchPricingData. Pricing will be unavailable.", error);
-        // Construct a default/error PriceData object
         const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
         return {
           provider, machineFamilyId: instanceId, machineFamilyName: `Error loading: ${instanceId}`, price: null,
@@ -414,7 +414,7 @@ export const fetchPricingData = async (
       }
     }
   }
-  if (!metadataLoaded) { // Check again after potential load attempt
+  if (!metadataLoaded) { 
       console.error(`[PricingData] Metadata still not loaded after attempt for provider ${provider}, instance ${instanceId}. Pricing will be unavailable.`);
       const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
       return {
@@ -426,7 +426,7 @@ export const fetchPricingData = async (
 
   const modelDetails = getPricingModelDetails(pricingModelValue) ||
                      pricingModelOptions.find(m => m.value === 'on-demand') ||
-                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; // Fallback
+                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; 
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
@@ -444,16 +444,13 @@ export const fetchPricingData = async (
     };
   }
 
-  // Instance IDs from machineFamilies.json are already "safe" for GCS paths.
-  // Pricing model values are also simple strings.
-  // Region IDs are also simple strings.
   const pricingFilePath = `${gcsFolderPathSegment}/${regionId}/${instanceId}/${pricingModelValue}.json`;
   
   let downloadURL = '';
 
   try {
     if (!storage) {
-      throw new Error("Firebase Storage instance is not available in fetchPricingData. Check Firebase initialization.");
+      throw new Error("Firebase Storage instance is not available in fetchPricingData. Check Firebase initialization in src/lib/firebase.ts and your .env variables.");
     }
     const pricingFileRef = ref(storage, pricingFilePath);
     console.log(`[PricingData] Getting download URL for ${provider} price: ${pricingFilePath}`);
@@ -464,7 +461,13 @@ export const fetchPricingData = async (
 
     if (!response.ok) {
       const responseText = await response.text();
-      console.error(`[PricingData] HTTP error fetching ${provider} pricing for ${instanceId} (Path: ${pricingFilePath}, URL: ${downloadURL}): ${response.status} ${response.statusText}. Response: ${responseText}`);
+      let detailMessage = `HTTP error fetching ${provider} pricing for ${instanceId} (Path: ${pricingFilePath}, URL: ${downloadURL}): ${response.status} ${response.statusText}. Response: ${responseText}`;
+      if (response.status === 403) {
+        detailMessage += ` A 403 error with getDownloadURL usually means Firebase Storage rules are denying access. Check your storage.rules for '${pricingFilePath}'.`;
+      } else if (response.status === 404) {
+        detailMessage += ` A 404 error means the file was not found at '${pricingFilePath}' in your Firebase Storage bucket ('${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}').`;
+      }
+      console.error(`[PricingData] ${detailMessage}`);
     } else {
       const pricingDataObject: { hourlyPrice?: number; [key: string]: any } = await response.json();
       if (pricingDataObject && typeof pricingDataObject.hourlyPrice === 'number') {
@@ -479,16 +482,16 @@ export const fetchPricingData = async (
      if (downloadURL) {
         errorMessage += `Attempted Download URL: '${downloadURL}'. `;
     }
-    if (error.message.includes('storage/object-not-found')) {
-      errorMessage += `FILE NOT FOUND in Firebase Storage. Please verify the file exists at this exact path and that Storage Rules allow access.`;
-    } else if (error.message.includes('storage/unauthorized')) {
-      errorMessage += `UNAUTHORIZED to access file in Firebase Storage. Check Firebase Storage rules. Your rules should permit reads (e.g., 'allow read;').`;
+    if (error.message.includes('storage/object-not-found') || (error.code && error.code === 'storage/object-not-found')) {
+      errorMessage += `FILE NOT FOUND in Firebase Storage at path '${pricingFilePath}'. Please verify the file exists and the path is correct. Bucket: '${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}'.`;
+    } else if (error.message.includes('storage/unauthorized') || (error.code && error.code === 'storage/unauthorized')) {
+      errorMessage += `UNAUTHORIZED to access file '${pricingFilePath}' in Firebase Storage. Check Firebase Storage rules (storage.rules). They might be denying read access.`;
     } else if (error.message.includes('Failed to fetch')) {
        errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status.`;
-    } else if (error instanceof SyntaxError) { // Error during response.json()
-       errorMessage += `MALFORMED JSON in pricing file. Please validate the JSON content.`;
+    } else if (error instanceof SyntaxError) { 
+       errorMessage += `MALFORMED JSON in pricing file '${pricingFilePath}'. Please validate the JSON content.`;
     } else {
-      errorMessage += `Details: ${error.message}`;
+      errorMessage += `Details: ${error.message}. Code: ${error.code || 'N/A'}`;
     }
     console.error(errorMessage, error);
   }
@@ -504,3 +507,4 @@ export const fetchPricingData = async (
     pricingModelValue: modelDetails.value,
   };
 };
+
