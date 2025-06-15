@@ -42,6 +42,7 @@ export interface PriceData {
   regionName: string;
   pricingModelLabel: string;
   pricingModelValue: string;
+  error?: string; // Added to carry error messages
 }
 
 // ComparisonRequest is no longer needed for dynamic individual fetching
@@ -71,3 +72,4 @@ export interface CpuDetails {
   architecture: string;
   clockSpeed?: string;
 }
+

@@ -22,8 +22,8 @@ import {
   getMachineFamilyGroups,
   getMachineInstancesForFamily,
   fetchPricingData,
-  loadProviderMetadata, // Ensure this is imported
-  getPricingModelsForProvider, // Added import for pricing models
+  loadProviderMetadata,
+  getPricingModelsForProvider,
 } from '@/lib/data';
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, CpuDetails } from '@/lib/types';
 
@@ -104,53 +104,51 @@ export default function CloudPriceComparatorPage() {
       console.log('[CloudPriceComparatorPage] loadProviderMetadata finished successfully.');
 
       const gcpGeos = getGeosForProvider('Google Cloud');
-      console.log('[CloudPriceComparatorPage] GCP Geos from getGeosForProvider:', gcpGeos);
       setGoogleGeoOptions(gcpGeos);
 
       const azGeos = getGeosForProvider('Azure');
-      console.log('[CloudPriceComparatorPage] Azure Geos from getGeosForProvider:', azGeos);
       setAzureGeoOptions(azGeos);
 
       const awsGeos = getGeosForProvider('AWS');
-      console.log('[CloudPriceComparatorPage] AWS Geos from getGeosForProvider:', awsGeos);
       setAwsGeoOptions(awsGeos);
-      
+
       setGooglePricingModelOptions(getPricingModelsForProvider('Google Cloud'));
       setAzurePricingModelOptions(getPricingModelsForProvider('Azure'));
       setAwsPricingModelOptions(getPricingModelsForProvider('AWS'));
 
-      console.log('[CloudPriceComparatorPage] Geo and pricing model options set.');
-      console.log(`[CloudPriceComparatorPage] Google Geo Options Populated: ${gcpGeos.length > 0}, Azure: ${azGeos.length > 0}, AWS: ${awsGeos.length > 0}`);
-
+      console.log(`[CloudPriceComparatorPage] Geos populated - GCP: ${gcpGeos.length > 0}, Azure: ${azGeos.length > 0}, AWS: ${awsGeos.length > 0}`);
 
     } catch (error: any) {
       console.error("[CloudPriceComparatorPage] CRITICAL: Failed to initialize metadata in component:", error);
       let toastTitle = "Metadata Initialization Error";
-      let toastDescription = `Could not load essential configuration data. Dropdowns may be empty or non-functional. Error: ${error.message}. Please check browser console for detailed error messages from 'src/lib/data.ts' and verify Firebase setup.`;
+      let toastDescription = `Could not load essential configuration data. Dropdowns may be empty or non-functional. Error: ${error.message}.`;
       
-      if (error && error.message) {
-        if (error.message.toLowerCase().includes("failed to fetch") || error.message.includes("NETWORK ERROR")) {
+      const lowerErrorMessage = error.message?.toLowerCase() || "";
+      if (lowerErrorMessage.includes("failed to fetch")) {
           toastTitle = "Network Error Fetching Metadata";
-          toastDescription = `Failed to download essential configuration files due to a network issue. This is often caused by:
-1. Your internet connection or local DNS issues.
-2. **Cloud Workstations Network Policy:** Egress (outbound) policies might be blocking Firebase Storage. Check your workstation's network configuration.
-3. Firewall, VPN, or proxy settings on your machine/network.
-4. Browser extensions (e.g., ad-blockers). Try disabling them.
-5. For more details, open your browser's developer console (F12 -> Console).`;
-        } else if (error.message.includes("FILE NOT FOUND")) {
-          toastDescription = "Configuration Error: A required metadata file was not found in Firebase Storage. Please ensure all metadata files are correctly uploaded. See console for details.";
-        } else if (error.message.includes("UNAUTHORIZED")) {
-          toastDescription = "Access Denied: Could not access metadata files in Firebase Storage. Please check your Firebase Storage rules to ensure public read access is allowed. See console for details.";
-        } else if (error.message.includes("MALFORMED JSON")) {
-          toastDescription = "Data Error: A metadata file contains invalid JSON. Please check the format of the files in Firebase Storage. See console for details.";
-        }
+          toastDescription = `A "Failed to fetch" error occurred trying to load metadata files. This could be due to:
+1.  **Internet Connection:** Check your connection.
+2.  **Cloud Workstations Network Policy:** Egress policies might block access to Firebase Storage or other external URLs. Verify network access to 'firebasestorage.googleapis.com' and the Google Fonts URLs.
+3.  **Firewall/VPN/Proxy:** Local or corporate network restrictions.
+4.  **Browser Extensions:** Ad blockers or privacy tools. Try incognito mode.
+5.  **DNS Issues:** Problems resolving Firebase or Google Fonts hostnames.
+Please check the browser's developer console for more specific network error details from 'src/lib/data.ts'.`;
+      } else if (lowerErrorMessage.includes("malformed json") || error instanceof SyntaxError) {
+          toastTitle = "Metadata Format Error";
+          toastDescription = `A metadata file (e.g., regions.json, machineFamilies.json) contains invalid JSON. Please check the format. Error: ${error.message}.`;
+      } else if (lowerErrorMessage.includes("storage/object-not-found")) {
+          toastTitle = "Metadata File Missing";
+          toastDescription = `One or more core metadata files (e.g., regions.json) were not found in Firebase Storage at the expected path '/metadata/'. Ensure all required JSON files are uploaded correctly. Error: ${error.message}.`;
+      } else if (lowerErrorMessage.includes("storage/unauthorized")) {
+          toastTitle = "Metadata Access Denied";
+          toastDescription = `Permission denied when trying to access metadata files from Firebase Storage. Check your Firebase Storage rules to ensure public read access is allowed for files under the '/metadata/' path. Error: ${error.message}.`;
       }
 
       toast({
         variant: "destructive",
         title: toastTitle,
         description: toastDescription,
-        duration: 20000, 
+        duration: 30000,
       });
     } finally {
       console.log('[CloudPriceComparatorPage] Setting isMetadataLoading to false in finally block.');
@@ -300,7 +298,7 @@ export default function CloudPriceComparatorPage() {
       setGoogleInstanceOptions(instances);
       updateCpuDetails(instances, setGoogleCpuDetails);
       if (instances.length > 0) setSelectedGoogleInstance(instances[0].id); else setSelectedGoogleInstance('');
-    } else if (!isMetadataLoading) { 
+    } else if (!isMetadataLoading) {
       setGoogleInstanceOptions([]);
       setSelectedGoogleInstance('');
       setGoogleCpuDetails(null);
@@ -339,7 +337,7 @@ export default function CloudPriceComparatorPage() {
 
   useEffect(() => {
     setGooglePriceData(null); setGoogleSapsRating(null);
-    if (selectedGoogleInstance && !isMetadataLoading) { 
+    if (selectedGoogleInstance && !isMetadataLoading) {
         const instance = googleInstanceOptions.find(inst => inst.id === selectedGoogleInstance);
         if (filterSapCertified && instance) {
             setGoogleSapsRating(instance.sapsRating || null);
@@ -353,7 +351,7 @@ export default function CloudPriceComparatorPage() {
 
   useEffect(() => {
     setAzurePriceData(null); setAzureSapsRating(null);
-    if (selectedAzureInstance && !isMetadataLoading) { 
+    if (selectedAzureInstance && !isMetadataLoading) {
         const instance = azureInstanceOptions.find(inst => inst.id === selectedAzureInstance);
         if (filterSapCertified && instance) {
             setAzureSapsRating(instance.sapsRating || null);
@@ -367,7 +365,7 @@ export default function CloudPriceComparatorPage() {
 
   useEffect(() => {
     setAwsPriceData(null); setAwsSapsRating(null);
-    if (selectedAwsInstance && !isMetadataLoading) { 
+    if (selectedAwsInstance && !isMetadataLoading) {
         const instance = awsInstanceOptions.find(inst => inst.id === selectedAwsInstance);
         if (filterSapCertified && instance) {
             setAwsSapsRating(instance.sapsRating || null);
@@ -387,11 +385,29 @@ export default function CloudPriceComparatorPage() {
   useEffect(() => {
     if (selectedGoogleRegion && selectedGoogleInstance && selectedGooglePricingModel && !isMetadataLoading) {
       setIsGooglePriceLoading(true);
+      setGooglePriceData(null);
       fetchPricingData('Google Cloud', selectedGoogleRegion, selectedGoogleInstance, selectedGooglePricingModel)
-        .then(setGooglePriceData)
-        .catch(error => {
-          console.error("Error fetching Google Cloud price:", error);
-          toast({ variant: "destructive", title: "Pricing Error", description: `Failed to fetch Google Cloud price for ${selectedGoogleInstance}. Check console.` });
+        .then(priceResult => {
+          if (priceResult.error) {
+            toast({
+              variant: "destructive",
+              title: `Google Cloud Pricing Error`,
+              description: `For ${selectedGoogleInstance}: ${priceResult.error}. Ensure GCF is deployed with correct permissions/config and CSVs are present in GCS.`,
+              duration: 15000,
+            });
+            setGooglePriceData(null);
+          } else {
+            setGooglePriceData(priceResult);
+          }
+        })
+        .catch((clientError: any) => {
+          console.error("Client-side error fetching Google Cloud price:", clientError);
+          toast({
+            variant: "destructive",
+            title: "Pricing Fetch Error (GCP)",
+            description: `Failed to communicate with pricing service for Google Cloud ${selectedGoogleInstance}. Details: ${clientError.message}. Check console and ensure GCF URL is correct in .env and GCF is running.`,
+            duration: 15000,
+          });
           setGooglePriceData(null);
         })
         .finally(() => setIsGooglePriceLoading(false));
@@ -403,11 +419,29 @@ export default function CloudPriceComparatorPage() {
   useEffect(() => {
     if (selectedAzureRegion && selectedAzureInstance && selectedAzurePricingModel && !isMetadataLoading) {
       setIsAzurePriceLoading(true);
+      setAzurePriceData(null);
       fetchPricingData('Azure', selectedAzureRegion, selectedAzureInstance, selectedAzurePricingModel)
-        .then(setAzurePriceData)
-        .catch(error => {
-          console.error("Error fetching Azure price:", error);
-          toast({ variant: "destructive", title: "Pricing Error", description: `Failed to fetch Azure price for ${selectedAzureInstance}. Check console.` });
+        .then(priceResult => {
+          if (priceResult.error) {
+            toast({
+              variant: "destructive",
+              title: `Azure Pricing Error`,
+              description: `For ${selectedAzureInstance}: ${priceResult.error}. Ensure GCF is deployed with correct permissions/config and CSVs are present in GCS.`,
+              duration: 15000,
+            });
+            setAzurePriceData(null);
+          } else {
+            setAzurePriceData(priceResult);
+          }
+        })
+        .catch((clientError: any) => {
+          console.error("Client-side error fetching Azure price:", clientError);
+          toast({
+            variant: "destructive",
+            title: "Pricing Fetch Error (Azure)",
+            description: `Failed to communicate with pricing service for Azure ${selectedAzureInstance}. Details: ${clientError.message}. Check console and ensure GCF URL is correct in .env and GCF is running.`,
+            duration: 15000,
+          });
           setAzurePriceData(null);
         })
         .finally(() => setIsAzurePriceLoading(false));
@@ -419,11 +453,29 @@ export default function CloudPriceComparatorPage() {
   useEffect(() => {
     if (selectedAwsRegion && selectedAwsInstance && selectedAwsPricingModel && !isMetadataLoading) {
       setIsAwsPriceLoading(true);
+      setAwsPriceData(null);
       fetchPricingData('AWS', selectedAwsRegion, selectedAwsInstance, selectedAwsPricingModel)
-        .then(setAwsPriceData)
-        .catch(error => {
-          console.error("Error fetching AWS price:", error);
-          toast({ variant: "destructive", title: "Pricing Error", description: `Failed to fetch AWS price for ${selectedAwsInstance}. Check console.` });
+        .then(priceResult => {
+          if (priceResult.error) {
+            toast({
+              variant: "destructive",
+              title: `AWS Pricing Error`,
+              description: `For ${selectedAwsInstance}: ${priceResult.error}. Ensure GCF is deployed with correct permissions/config and CSVs are present in GCS.`,
+              duration: 15000,
+            });
+            setAwsPriceData(null);
+          } else {
+            setAwsPriceData(priceResult);
+          }
+        })
+        .catch((clientError: any) => {
+          console.error("Client-side error fetching AWS price:", clientError);
+          toast({
+            variant: "destructive",
+            title: "Pricing Fetch Error (AWS)",
+            description: `Failed to communicate with pricing service for AWS ${selectedAwsInstance}. Details: ${clientError.message}. Check console and ensure GCF URL is correct in .env and GCF is running.`,
+            duration: 15000,
+          });
           setAwsPriceData(null);
         })
         .finally(() => setIsAwsPriceLoading(false));
@@ -470,9 +522,15 @@ export default function CloudPriceComparatorPage() {
     if (isLoading || isMetadataLoading) {
       return <div className={`${priceDisplayWrapperClass} flex items-center`}><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading price...</div>;
     }
+
+    if (priceData && priceData.error) { // Check for explicit error from GCF
+      return <div className={`${priceDisplayWrapperClass} text-sm text-destructive`}>Error: {priceData.error}</div>;
+    }
+
     if (!priceData || priceData.price === null) {
       return <div className={`${priceDisplayWrapperClass} text-sm text-muted-foreground`}>Price not available</div>;
     }
+
 
     const monthlyPrice = priceData.price * HOURS_IN_MONTH;
     let differenceText = '';
@@ -551,7 +609,7 @@ export default function CloudPriceComparatorPage() {
               onCheckedChange={(checked) => {
                 setFilterSapCertified(checked as boolean);
                 if (!(checked as boolean)) {
-                  setApplyToleranceFilter(false); 
+                  setApplyToleranceFilter(false);
                 }
               }}
               disabled={isMetadataLoading}
@@ -587,7 +645,7 @@ export default function CloudPriceComparatorPage() {
                 <Input id="common-custom-ram" type="number" placeholder="e.g. 16" value={customRam} onChange={e => setCustomRam(e.target.value)} className="h-10 text-sm" disabled={isMetadataLoading} />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
             <div className="space-y-4 p-4 border rounded-md shadow-sm bg-card">
               <h3 className="text-lg font-medium text-primary flex items-center"><Cloud className="mr-2 h-5 w-5 text-blue-500" />Google Cloud</h3>
@@ -750,4 +808,3 @@ export default function CloudPriceComparatorPage() {
   );
 }
 
-    

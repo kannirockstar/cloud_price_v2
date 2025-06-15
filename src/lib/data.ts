@@ -29,19 +29,19 @@ export async function loadProviderMetadata(): Promise<void> {
     try {
       const [gcpRegionsData, azRegionsData, awsRegionsData, mfData] = await Promise.all([
         fetch(coreMetadataFilePaths.googleCloudRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.googleCloudRegions}: ${res.status} ${res.statusText}. Check if the file exists in the /public/metadata directory and if your Next.js dev server is running correctly.`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.googleCloudRegions}: ${res.status} ${res.statusText}.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.azureRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.azureRegions}: ${res.status} ${res.statusText}. Check if the file exists in the /public/metadata directory and if your Next.js dev server is running correctly.`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.azureRegions}: ${res.status} ${res.statusText}.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.awsRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.awsRegions}: ${res.status} ${res.statusText}. Check if the file exists in the /public/metadata directory and if your Next.js dev server is running correctly.`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.awsRegions}: ${res.status} ${res.statusText}.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.machineFamilies, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.machineFamilies}: ${res.status} ${res.statusText}. Check if the file exists in the /public/metadata directory and if your Next.js dev server is running correctly.`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.machineFamilies}: ${res.status} ${res.statusText}.`);
           return res.json();
         }),
       ]);
@@ -54,7 +54,7 @@ export async function loadProviderMetadata(): Promise<void> {
       metadataLoaded = true;
       console.log("[Metadata] Core metadata loaded from local /public directory successfully.");
       console.log(`[Metadata] Loaded ${googleCloudRegions.length} GCP regions, ${azureRegions.length} Azure regions, ${awsRegions.length} AWS regions, ${machineFamilies.length} machine families.`);
-    
+
     } catch (error: any) {
       let detailMessage = `[Metadata] CRITICAL OVERALL ERROR during local metadata loading process: ${error.message}.`;
       if (error.message && error.message.toLowerCase().includes("failed to fetch")) {
@@ -72,8 +72,8 @@ export async function loadProviderMetadata(): Promise<void> {
       azureRegions = [];
       awsRegions = [];
       machineFamilies = [];
-      metadataLoaded = false; 
-      throw error; 
+      metadataLoaded = false;
+      throw error;
     } finally {
       metadataLoadingPromise = null;
     }
@@ -120,9 +120,9 @@ export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | 
   let cpuCount: number | null = null;
   if (machine.cpu) {
     if (machine.cpu.toLowerCase().includes('shared')) {
-      cpuCount = 0.5; 
+      cpuCount = 0.5;
     } else {
-      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/); 
+      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/);
       if (cpuMatch && cpuMatch[1]) {
         cpuCount = parseFloat(cpuMatch[1]);
       }
@@ -161,23 +161,23 @@ export const getMachineFamilyGroups = (
   if (minCpu !== undefined || userMinRamGB !== undefined) {
     filteredMachines = filteredMachines.filter(mf => {
       const specs = parseMachineSpecs(mf);
-      
+
       let cpuMatch = true;
       if (minCpu !== undefined && specs.cpuCount !== null) {
         const lowerBoundCpu = filterSapCertified && applyTolerance ? minCpu * 0.85 : minCpu;
-        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity; 
+        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
         cpuMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
-      } else if (minCpu !== undefined && specs.cpuCount === null) { 
-         cpuMatch = minCpu <= 0; 
+      } else if (minCpu !== undefined && specs.cpuCount === null) {
+         cpuMatch = minCpu <= 0;
       }
 
       let ramMatch = true;
       if (userMinRamGB !== undefined && specs.ramInGB !== null) {
         const lowerBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 0.85 : userMinRamGB;
-        const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity; 
+        const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity;
         ramMatch = specs.ramInGB >= lowerBoundRam && specs.ramInGB <= upperBoundRam;
-      } else if (userMinRamGB !== undefined && specs.ramInGB === null) { 
-        ramMatch = userMinRamGB <=0; 
+      } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
+        ramMatch = userMinRamGB <=0;
       }
       return cpuMatch && ramMatch;
     });
@@ -210,7 +210,7 @@ export const getMachineInstancesForFamily = (
        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
        cpuFilterMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
     } else if (minCpu !== undefined && specs.cpuCount === null) {
-       cpuFilterMatch = minCpu <= 0; 
+       cpuFilterMatch = minCpu <= 0;
     }
 
     let ramFilterMatch = true;
@@ -251,7 +251,7 @@ export const getMachineInstancesForFamily = (
             }
             const comparison = aPart.localeCompare(bPart);
             if (comparison !== 0) return comparison;
-          } else { 
+          } else {
             return typeof aPart === 'number' ? -1 : 1;
           }
         }
@@ -370,33 +370,39 @@ export const fetchPricingData = async (
         return {
           provider, machineFamilyId: instanceId, machineFamilyName: `Error loading: ${instanceId}`, price: null,
           regionId, regionName: `Error loading: ${regionId}`, pricingModelLabel: modelDetailsFall.label, pricingModelValue: modelDetailsFall.value,
+          error: "Core metadata loading failed."
         };
       }
     }
   }
-  if (!metadataLoaded) { 
-      console.error(`[PricingData] Core metadata still not loaded after attempt for provider ${provider}, instance ${instanceId}. Pricing will be unavailable.`);
+  if (!metadataLoaded) {
+      const errorMsg = `[PricingData] Core metadata still not loaded after attempt for provider ${provider}, instance ${instanceId}. Pricing will be unavailable.`;
+      console.error(errorMsg);
       const modelDetailsFall = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
       return {
           provider, machineFamilyId: instanceId, machineFamilyName: `Metadata load failed: ${instanceId}`, price: null,
           regionId, regionName: `Metadata load failed: ${regionId}`, pricingModelLabel: modelDetailsFall.label, pricingModelValue: modelDetailsFall.value,
+          error: "Core metadata failed to load, cannot fetch pricing."
       };
   }
 
   const modelDetails = getPricingModelDetails(pricingModelValue) ||
                      pricingModelOptions.find(m => m.value === 'on-demand') ||
-                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; 
+                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
+  let gcfErrorDetails: string | undefined = undefined;
 
   const cloudFunctionUrl = process.env.NEXT_PUBLIC_PRICING_FUNCTION_URL;
 
   if (!cloudFunctionUrl) {
-    console.error("[PricingData] CRITICAL: NEXT_PUBLIC_PRICING_FUNCTION_URL is not set. Cannot fetch pricing data.");
+    const errorMsg = "[PricingData] CRITICAL: NEXT_PUBLIC_PRICING_FUNCTION_URL is not set. Cannot fetch pricing data.";
+    console.error(errorMsg);
     return {
       provider, machineFamilyId: instanceId, machineFamilyName, price: null,
       regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
+      error: errorMsg
     };
   }
 
@@ -415,13 +421,16 @@ export const fetchPricingData = async (
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from Cloud Function" }));
       console.error(`[PricingData] Cloud Function Error for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${response.status} ${response.statusText}. Details: ${errorData?.error || 'N/A'}`);
+      gcfErrorDetails = errorData?.error || `Cloud Function returned ${response.status} ${response.statusText || ''}`.trim();
     } else {
       const pricingDataObject: { hourlyPrice?: number; [key: string]: any } = await response.json();
       if (pricingDataObject && typeof pricingDataObject.hourlyPrice === 'number') {
         price = parseFloat(Math.max(0.000001, pricingDataObject.hourlyPrice).toFixed(6));
         console.log(`[PricingData] Successfully fetched and parsed price via Cloud Function for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${price}`);
       } else {
-        console.warn(`[PricingData] Hourly price not found or not a number in Cloud Function response for ${provider} ${instanceId}. Received data:`, pricingDataObject);
+        const warnMsg = `[PricingData] Hourly price not found or not a number in Cloud Function response for ${provider} ${instanceId}. Received data: ${JSON.stringify(pricingDataObject)}`;
+        console.warn(warnMsg);
+        gcfErrorDetails = "Cloud Function returned invalid pricing data format.";
       }
     }
   } catch (error: any) {
@@ -437,8 +446,9 @@ export const fetchPricingData = async (
         errorMessage += `Details: ${error.message}.`;
     }
     console.error(errorMessage, error);
+    gcfErrorDetails = `Client-side error: ${error.message}`;
   }
-  
+
   return {
     provider,
     machineFamilyId: instanceId,
@@ -448,6 +458,6 @@ export const fetchPricingData = async (
     regionName,
     pricingModelLabel: modelDetails.label,
     pricingModelValue: modelDetails.value,
+    error: gcfErrorDetails,
   };
 };
-
