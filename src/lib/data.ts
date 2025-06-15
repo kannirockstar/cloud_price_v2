@@ -28,10 +28,9 @@ export async function loadProviderMetadata(): Promise<void> {
   }
 
   metadataLoadingPromise = (async () => {
-    console.log("[Metadata] Attempting to load provider metadata from Firebase Storage...");
     if (!storage) {
       console.error("[Metadata] CRITICAL: Firebase Storage instance is not available. Ensure NEXT_PUBLIC_FIREBASE_... variables are set in .env and Firebase is initialized in src/lib/firebase.ts.");
-      metadataLoaded = false; 
+      metadataLoaded = false;
       metadataLoadingPromise = null;
       throw new Error("Firebase Storage not initialized. Cannot load metadata.");
     } else {
@@ -51,18 +50,18 @@ export async function loadProviderMetadata(): Promise<void> {
             downloadURL = await getDownloadURL(fileRef);
             console.log(`[Metadata] Successfully got downloadURL for ${fileName}: ${downloadURL}`);
 
-            console.log(`[Metadata] Fetching ${fileName} from: ${downloadURL}`);
+            console.log(`[Metadata] Attempting to fetch ${fileName} using downloadURL: ${downloadURL}`); // Added log
             const response = await fetch(downloadURL, { cache: 'no-store' });
             
             if (!response.ok) {
               const errorText = await response.text();
-              let detailMessage = `Failed to fetch ${fileName} (URL: ${downloadURL}). Status: ${response.status} ${response.statusText}. Response: ${errorText}`;
+              let detailMessage = `[Metadata] HTTP error fetching ${fileName} (URL: ${downloadURL}). Status: ${response.status} ${response.statusText}. Response: ${errorText}. `;
               if (response.status === 403) {
-                detailMessage += ` A 403 error usually means Firebase Storage rules are denying access. Check your storage.rules. Ensure they allow public read for 'metadata/${fileName}' or 'metadata/**'. Current rules might be too restrictive.`;
+                detailMessage += `A 403 error on a Firebase download URL usually means Firebase Storage rules are denying access. Check your storage.rules. Ensure they allow public read for '${filePath}' or 'metadata/**'.`;
               } else if (response.status === 404) {
-                 detailMessage += ` A 404 error means the file was not found at the path '${filePath}' in your Firebase Storage bucket. Verify the file exists.`;
+                 detailMessage += `A 404 error means the file was not found at the path '${filePath}' in your Firebase Storage bucket ('${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}') when trying to use the download URL. Verify the file exists.`;
               }
-              console.error(`[Metadata] ${detailMessage}`);
+              console.error(detailMessage);
               throw new Error(detailMessage);
             }
             console.log(`[Metadata] Successfully fetched ${fileName}. Status: ${response.status}. Attempting to parse JSON.`);
@@ -75,14 +74,22 @@ export async function loadProviderMetadata(): Promise<void> {
               errorMessage += `Attempted Download URL: '${downloadURL}'. `;
             }
             if (fileError.message.includes('storage/object-not-found') || (fileError.code && fileError.code === 'storage/object-not-found')) {
-              errorMessage += `FILE NOT FOUND in Firebase Storage at path '${filePath}'. Please verify the file exists.`;
+              errorMessage += `FILE NOT FOUND in Firebase Storage at path '${filePath}'. Please verify the file exists. Bucket: '${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}'.`;
             } else if (fileError.message.includes('storage/unauthorized') || (fileError.code && fileError.code === 'storage/unauthorized')) {
-              errorMessage += `UNAUTHORIZED to access file '${filePath}' in Firebase Storage. Check Firebase Storage rules (storage.rules). They might be denying read access.`;
+              errorMessage += `UNAUTHORIZED to access file '${filePath}' in Firebase Storage (e.g. via getDownloadURL). Check Firebase Storage rules (storage.rules). They might be denying read access.`;
             } else if (fileError.message.includes('Failed to fetch')) {
-               errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status. Also check CORS policy on the bucket if direct GCS URLs were previously used.`;
+               errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status. The browser could not complete the fetch request. This could be due to:
+    - No internet connection.
+    - DNS resolution failure for '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
+    - A firewall, VPN, or browser extension (like an ad-blocker) blocking the request.
+    - The Firebase Storage service itself might be temporarily unavailable (check Firebase status page).
+    - If a downloadURL was obtained, it might have expired or been malformed, although this is less likely for short-lived operations.`;
             } else if (fileError instanceof SyntaxError) { 
               errorMessage += `MALFORMED JSON in file '${fileName}'. Please validate the JSON content.`;
-            } else {
+            } else if (fileError.message.includes('Firebase Storage:')) { // Catch other Firebase specific errors
+              errorMessage += `FIREBASE STORAGE SDK ERROR: ${fileError.message} (Code: ${fileError.code || 'N/A'}). This could be an issue with initialization, permissions, or the file itself.`;
+            }
+            else {
               errorMessage += `Details: ${fileError.message}. Code: ${fileError.code || 'N/A'}`;
             }
             console.error(errorMessage, fileError);
@@ -102,12 +109,12 @@ export async function loadProviderMetadata(): Promise<void> {
     
     } catch (error: any) {
       console.error("[Metadata] CRITICAL OVERALL ERROR during metadata loading process (using getDownloadURL):", error.message, error);
-      if (error.message && error.message.includes("403")) {
-        console.error("[Metadata] 🔴 A 403 Forbidden error when using getDownloadURL often indicates your Firebase Storage rules are denying access. Please check your `storage.rules` file and ensure it allows public read access, for example: `rules_version = '2'; service firebase.storage { match /b/{bucket}/o { match /{allPaths=**} { allow read; allow write: if request.auth != null; /* or more restrictive */ } } }`");
-      } else if (error.message && error.message.includes("object-not-found")) {
-         console.error(`[Metadata] 🔴 An "object-not-found" error means a file (e.g., one of ${metadataFileNames.join(', ')}) was not found at the expected path in your Firebase Storage bucket ('metadata/' folder). Verify all metadata files are uploaded correctly.`);
+      if (error.message && (error.message.includes("storage/object-not-found") || (error.code && error.code === 'storage/object-not-found'))) {
+         console.error(`[Metadata] 🔴 An "object-not-found" error means a file (e.g., one of ${metadataFileNames.join(', ')}) was not found at the expected path in your Firebase Storage bucket ('metadata/' folder). Verify all metadata files are uploaded correctly to 'gs://${storage.app.options.storageBucket || 'YOUR_BUCKET_NAME'}/metadata/'.`);
+      } else if (error.message && (error.message.includes("storage/unauthorized") || (error.code && error.code === 'storage/unauthorized'))) {
+         console.error(`[Metadata] 🔴 An "unauthorized" error using getDownloadURL often indicates your Firebase Storage rules are denying access. Please check your \`storage.rules\` file and ensure it allows public read access, for example: \`rules_version = '2'; service firebase.storage { match /b/{bucket}/o { match /{allPaths=**} { allow read; allow write: if request.auth != null; } } }\` and that these rules have been deployed.`);
       } else if (error.message && error.message.includes("NEXT_PUBLIC_FIREBASE_")) {
-         console.error("[Metadata] 🔴 This error might be due to missing or incorrect Firebase configuration environment variables (NEXT_PUBLIC_FIREBASE_...). Please ensure your .env file is correctly set up and your Next.js server has been restarted.");
+         console.error("[Metadata] 🔴 This error might be due to missing or incorrect Firebase configuration environment variables (NEXT_PUBLIC_FIREBASE_...). Please ensure your .env file is correctly set up with values from your Firebase project's web app config, and your Next.js server has been restarted.");
       }
       googleCloudRegions = [];
       azureRegions = [];
@@ -455,7 +462,7 @@ export const fetchPricingData = async (
     const pricingFileRef = ref(storage, pricingFilePath);
     console.log(`[PricingData] Getting download URL for ${provider} price: ${pricingFilePath}`);
     downloadURL = await getDownloadURL(pricingFileRef);
-    console.log(`[PricingData] Fetching ${provider} pricing for ${instanceId} from: ${downloadURL}`);
+    console.log(`[PricingData] Fetching ${provider} pricing for ${instanceId} from download URL: ${downloadURL}`); // Added log
     
     const response = await fetch(downloadURL, { cache: 'no-store' });
 
@@ -463,9 +470,9 @@ export const fetchPricingData = async (
       const responseText = await response.text();
       let detailMessage = `HTTP error fetching ${provider} pricing for ${instanceId} (Path: ${pricingFilePath}, URL: ${downloadURL}): ${response.status} ${response.statusText}. Response: ${responseText}`;
       if (response.status === 403) {
-        detailMessage += ` A 403 error with getDownloadURL usually means Firebase Storage rules are denying access. Check your storage.rules for '${pricingFilePath}'.`;
+        detailMessage += ` A 403 error on a Firebase download URL usually means Firebase Storage rules are denying access. Check your storage.rules for '${pricingFilePath}'.`;
       } else if (response.status === 404) {
-        detailMessage += ` A 404 error means the file was not found at '${pricingFilePath}' in your Firebase Storage bucket ('${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}').`;
+        detailMessage += ` A 404 error means the file was not found at '${pricingFilePath}' in your Firebase Storage bucket ('${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}') when trying to use the download URL. Verify the file exists.`;
       }
       console.error(`[PricingData] ${detailMessage}`);
     } else {
@@ -485,12 +492,20 @@ export const fetchPricingData = async (
     if (error.message.includes('storage/object-not-found') || (error.code && error.code === 'storage/object-not-found')) {
       errorMessage += `FILE NOT FOUND in Firebase Storage at path '${pricingFilePath}'. Please verify the file exists and the path is correct. Bucket: '${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}'.`;
     } else if (error.message.includes('storage/unauthorized') || (error.code && error.code === 'storage/unauthorized')) {
-      errorMessage += `UNAUTHORIZED to access file '${pricingFilePath}' in Firebase Storage. Check Firebase Storage rules (storage.rules). They might be denying read access.`;
+      errorMessage += `UNAUTHORIZED to access file '${pricingFilePath}' in Firebase Storage (e.g. via getDownloadURL). Check Firebase Storage rules (storage.rules). They might be denying read access.`;
     } else if (error.message.includes('Failed to fetch')) {
-       errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status.`;
+       errorMessage += `NETWORK ERROR or issue with download URL. Check network connectivity and Firebase service status. The browser could not complete the fetch request. This could be due to:
+    - No internet connection.
+    - DNS resolution failure for '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
+    - A firewall, VPN, or browser extension (like an ad-blocker) blocking the request.
+    - The Firebase Storage service itself might be temporarily unavailable (check Firebase status page).
+    - If a downloadURL was obtained, it might have expired or been malformed, although this is less likely for short-lived operations.`;
     } else if (error instanceof SyntaxError) { 
        errorMessage += `MALFORMED JSON in pricing file '${pricingFilePath}'. Please validate the JSON content.`;
-    } else {
+    } else if (error.message.includes('Firebase Storage:')) { // Catch other Firebase specific errors
+      errorMessage += `FIREBASE STORAGE SDK ERROR: ${error.message} (Code: ${error.code || 'N/A'}). This could be an issue with initialization, permissions, or the file itself.`;
+    }
+    else {
       errorMessage += `Details: ${error.message}. Code: ${error.code || 'N/A'}`;
     }
     console.error(errorMessage, error);
@@ -508,3 +523,4 @@ export const fetchPricingData = async (
   };
 };
 
+    

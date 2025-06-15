@@ -1,16 +1,8 @@
 
-# General BigQuery Configuration (used by GCE BQ API route)
-BIGQUERY_PROJECT_ID=manifest-setup-342214
-BIGQUERY_DATASET_ID=cloudprice
-
-# GCE Specific BigQuery Table
-BIGQUERY_GCE_TABLE_ID=GCE
-
-# Azure Specific BigQuery Table (for future use if Azure data moves to BQ)
-BIGQUERY_AZURE_TABLE_ID=AZURE
-
-# EC2/AWS Specific BigQuery Table (for future use if EC2 data moves to BQ)
-BIGQUERY_EC2_TABLE_ID=EC2
-
-# For local development with service account keys, uncomment and set:
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account-key.json
+NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyDpP3OGMp5wV7MX3eQuUGEdpUjW7SXGYVk
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=price-comparison-cc262.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=price-comparison-cc262
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=price-comparison-cc262.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=948644455037
+NEXT_PUBLIC_FIREBASE_APP_ID=1:948644455037:web:f06d0a57da16d830af0714
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-Z7MW1KF3WZ
