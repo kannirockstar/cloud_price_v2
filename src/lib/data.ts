@@ -16,13 +16,14 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   let response: Response;
   try {
     response = await fetch(url);
+
     if (!response.ok) {
       console.error(`Failed to fetch metadata file ${fileName}: ${response.status} ${response.statusText} from ${url}`);
       try {
         const errorBody = await response.text();
-        console.error(`Response body for failed fetch of ${fileName}: ${errorBody}`);
+        console.error(`Response body for failed fetch of ${fileName} (${response.status}): ${errorBody}`);
       } catch (bodyError) {
-        console.error(`Could not read response body for failed fetch of ${fileName}.`);
+        console.error(`Could not read response body for failed fetch of ${fileName} (${response.status}).`);
       }
       return null;
     }
@@ -514,4 +515,3 @@ export const fetchPricingData = async (
     };
   }
 };
-
