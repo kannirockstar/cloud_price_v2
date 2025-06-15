@@ -11,9 +11,13 @@ const bucketName = process.env.GCS_BUCKET_NAME;
 
 /**
  * Parses GCE CSV content to find the hourly price for a specific instance and pricing model.
- * GCE CSV is expected to have unit prices for vCPU and RAM based on commitment.
+ * GCE CSV is expected to have unit prices for vCPU and RAM based on commitment for each machine family.
+ * For a given MachineFamily (e.g., 'e2-standard-2'), the 'OnDemand_VCPU_per_Hour' column
+ * is assumed to contain the total vCPU cost for that specific machine type, and
+ * 'OnDemand_RAM_per_GiB_Hour' contains the total RAM cost for that type.
+ * This function sums these two components to get the total hourly price.
  * @param csvContent The full string content of the CSV file.
- * @param targetMachineFamily The machine family to find (e.g., 'e2-standard-2').
+ * @param targetMachineFamily The machine family to find (e.g., 'e2-standard-2' - after stripping 'gcp-' prefix).
  * @param targetPricingModel The GCE pricing model value (e.g., 'on-demand', 'gcp-1yr-cud').
  * @param filePath For logging purposes.
  * @returns The total hourly price as a number, or null if not found or error.
@@ -48,7 +52,7 @@ function parseGceCsvForPrice(
     vcpuPriceColIndex = headerRow.indexOf('cud_3yr_vcpu_per_hour');
     ramPriceColIndex = headerRow.indexOf('cud_3yr_ram_per_gib_hour');
   } else {
-    console.warn(`[GCF/parseGceCsvForPrice] Unsupported GCE pricing model '${targetPricingModel}' for CSV parsing in ${filePath}. Only 'on-demand', 'gcp-1yr-cud', 'gcp-3yr-cud' are supported by current CSV headers.`);
+    console.warn(`[GCF/parseGceCsvForPrice] Unsupported GCE pricing model '${targetPricingModel}' for CSV parsing in ${filePath}. Only 'on-demand', 'gcp-1yr-cud', 'gcp-3yr-cud' are supported by current CSV headers. Flexible CUDs or other models need different handling or CSV columns.`);
     return null; // Flexible CUDs or other models not in headers
   }
 
@@ -190,7 +194,7 @@ export const getPricingData: HttpFunction = async (req, res) => {
         gcsFolder = 'GCE';
         csvFileName = `gce_all_models_${regionId}.csv`;
         filePath = `${gcsFolder}/${csvFileName}`;
-        const targetMachineFamily = instanceId.replace(/^gcp-/, ''); // e.g., "e2-standard-2" from "gcp-e2-standard-2"
+        const gceMachineFamilyToLookup = instanceId.replace(/^gcp-/, ''); // e.g., "e2-standard-2" from "gcp-e2-standard-2"
         
         console.log(`[GCF/getPricingData] Attempting GCE CSV download: gs://${bucketName}/${filePath}`);
         const file = storage.bucket(bucketName).file(filePath);
@@ -202,11 +206,11 @@ export const getPricingData: HttpFunction = async (req, res) => {
         }
         const [contentBuffer] = await file.download();
         const contentString = contentBuffer.toString();
-        foundPrice = parseGceCsvForPrice(contentString, targetMachineFamily, pricingModelValue, filePath);
+        foundPrice = parseGceCsvForPrice(contentString, gceMachineFamilyToLookup, pricingModelValue, filePath);
 
       } else if (provider === 'Azure') {
         gcsFolder = 'Azure';
-        csvFileName = `${regionId}_prices.csv`;
+        csvFileName = `${regionId}_prices.csv`; // e.g., Azure/australiacentral2_prices.csv
         filePath = `${gcsFolder}/${csvFileName}`;
 
         console.log(`[GCF/getPricingData] Attempting Azure CSV download: gs://${bucketName}/${filePath}`);
@@ -223,7 +227,7 @@ export const getPricingData: HttpFunction = async (req, res) => {
       
       } else if (provider === 'AWS') {
         gcsFolder = 'EC2';
-        csvFileName = `ec2_pricing_${regionId}.csv`;
+        csvFileName = `ec2_pricing_${regionId}.csv`; // e.g., EC2/ec2_pricing_af-south-1.csv
         filePath = `${gcsFolder}/${csvFileName}`;
 
         console.log(`[GCF/getPricingData] Attempting AWS CSV download: gs://${bucketName}/${filePath}`);
@@ -246,6 +250,7 @@ export const getPricingData: HttpFunction = async (req, res) => {
       if (foundPrice !== null) {
         res.status(200).send({ hourlyPrice: foundPrice });
       } else {
+        // Generic error message if price not found, specific details logged by parsers
         let specificErrorMsg = `Price not found for instance ${instanceId} with pricing model ${pricingModelValue} in CSV file ${filePath}.`;
         if (provider === 'Google Cloud') {
             specificErrorMsg += ` Check GCE CSV content for matching 'MachineFamily' ('${instanceId.replace(/^gcp-/, '')}') and ensure model '${pricingModelValue}' maps to existing VCPU/RAM price columns (e.g., OnDemand_VCPU_per_Hour, CUD_1yr_RAM_per_GiB_Hour).`;
