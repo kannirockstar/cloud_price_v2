@@ -9,6 +9,12 @@ let metadataLoaded = false;
 let metadataLoadingPromise: Promise<void> | null = null;
 
 const GCS_BUCKET_NAME = 'cloudprice-comparator.firebasestorage.app'; // Your GCS bucket
+const metadataFileNames = [
+  'googleCloudRegions.json',
+  'azureRegions.json',
+  'awsRegions.json',
+  'machineFamilies.json',
+];
 
 export async function loadProviderMetadata(): Promise<void> {
   if (metadataLoaded) {
@@ -23,17 +29,11 @@ export async function loadProviderMetadata(): Promise<void> {
   metadataLoadingPromise = (async () => {
     console.log("[Metadata] Fetching provider metadata from GCS...");
     try {
-      const metadataFileNames = [
-        'googleCloudRegions.json',
-        'azureRegions.json',
-        'awsRegions.json',
-        'machineFamilies.json',
-      ];
-
       const [gcpRegionsData, azRegionsData, awsRegionsData, mfData] = await Promise.all(
         metadataFileNames.map(async (fileName) => {
           const response = await fetch(`https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`, { cache: 'no-store' });
           if (!response.ok) {
+            // Construct a detailed error message including the URL
             throw new Error(`Failed to fetch ${fileName} from GCS: ${response.status} ${response.statusText}. URL: ${response.url}`);
           }
           return response.json();
@@ -49,21 +49,39 @@ export async function loadProviderMetadata(): Promise<void> {
       console.log("[Metadata] Provider metadata fetching from GCS complete.");
       console.log(`[Metadata] Loaded ${googleCloudRegions.length} GCP regions, ${azureRegions.length} Azure regions, ${awsRegions.length} AWS regions, ${machineFamilies.length} machine families.`);
     } catch (error: any) {
-      console.error("[Metadata] Error fetching or processing metadata from GCS:", error.message);
-      if (error instanceof TypeError && error.message.toLowerCase().includes("failed to fetch")) {
-        console.error("[Metadata] 'Failed to fetch' can be due to several reasons:");
+      // Prioritize checking for 403 errors in the message
+      if (error.message && error.message.includes(" from GCS: 403")) {
+        console.error(`[Metadata] CRITICAL GCS PERMISSION ERROR: ${error.message}`);
+        console.error("[Metadata] A 403 Forbidden error means Google Cloud Storage denied access to the metadata file. This is almost always due to object-level IAM permissions.");
+        console.error("[Metadata] Please ensure the individual metadata files in your GCS bucket's '/metadata/' folder are publicly readable via their GCS URLs (not just Firebase Storage rules).");
+        console.error("  Troubleshooting steps for 403 Forbidden:");
+        console.error("  1. VERIFY PUBLIC ACCESS ON GCS OBJECTS:");
+        console.error(`     - You need to grant 'allUsers' the 'Storage Object Viewer' IAM role for each metadata file.`);
+        console.error(`     - Example for one file: \`gsutil iam ch allUsers:objectViewer gs://${GCS_BUCKET_NAME}/metadata/awsRegions.json\``);
+        console.error(`     - To make all files in the 'metadata/' folder public: \`gsutil iam ch allUsers:objectViewer gs://${GCS_BUCKET_NAME}/metadata/*\``);
+        console.error("     - Note: If your bucket uses legacy ACLs (less common), you might use `gsutil acl ch -u AllUsers:R gs://${GCS_BUCKET_NAME}/metadata/yourFileName.json` instead.");
+        console.error("  2. CORS POLICY (Less likely for 403, but good to double-check):");
+        console.error(`     - Ensure your GCS bucket '${GCS_BUCKET_NAME}' has a CORS policy allowing GET requests from your app's origin (e.g., http://localhost:9002).`);
+        console.error(`     - Check: \`gsutil cors get gs://${GCS_BUCKET_NAME}\``);
+        console.error("  3. VERIFY FILE PATHS: Ensure files exist at the exact paths (e.g., 'metadata/awsRegions.json'). Case-sensitivity matters.");
+      }
+      // Check for generic TypeErrors from fetch (e.g. network down, or CORS preflight failure reported as network error)
+      else if (error instanceof TypeError && error.message.toLowerCase().includes("failed to fetch")) {
+        console.error("[Metadata] GENERIC FETCH ERROR:", error.message);
+        console.error("[Metadata] 'Failed to fetch' can be due to several reasons (often CORS preflight failures if not a 403, or network issues):");
         console.error("  1. Network connectivity issues from your browser/client.");
         console.error(`  2. CORS (Cross-Origin Resource Sharing) policy on the GCS bucket '${GCS_BUCKET_NAME}'. Ensure your bucket is configured to allow GET requests from your application's origin (e.g., http://localhost:9002 or your deployed app domain).`);
         console.error("     - To check CORS: `gsutil cors get gs://" + GCS_BUCKET_NAME + "`");
         console.error("     - To set CORS (example for allowing all origins for GET): Create a cors-config.json `[{\"origin\": [\"*\"], \"method\": [\"GET\"], \"maxAgeSeconds\": 3600}]` and run `gsutil cors set cors-config.json gs://" + GCS_BUCKET_NAME + "`");
-        console.error("  3. Incorrect GCS bucket name or file paths. Verify the files exist at the constructed URLs, e.g.:");
+        console.error("  3. Incorrect GCS bucket name or file paths. Verify the files exist at the constructed URLs.");
         metadataFileNames.forEach(fileName => {
-          console.error(`     - https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`);
+          console.error(`     - Example URL: https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`);
         });
-        console.error("  4. GCS object permissions. Ensure the metadata files are publicly readable when accessed via direct storage.googleapis.com URLs. This is different from Firebase Storage download URLs which use tokens.");
-        console.error("     - To make an object public (example): `gsutil acl ch -u AllUsers:R gs://" + GCS_BUCKET_NAME + "/metadata/googleCloudRegions.json`");
-        console.error("     - To make all objects in the metadata/ folder public: `gsutil iam ch allUsers:objectViewer gs://" + GCS_BUCKET_NAME + "/metadata/*` (Granting `objectViewer` at the folder level, or `legacyObjectReader` if using legacy bucket permissions. Be cautious with public access.)");
+      } else {
+        // Other types of errors
+        console.error("[Metadata] UNHANDLED ERROR fetching/processing metadata:", error.message, error);
       }
+
       googleCloudRegions = [];
       azureRegions = [];
       awsRegions = [];
@@ -163,7 +181,7 @@ export const getMachineFamilyGroups = (
       let cpuMatch = true;
       if (minCpu !== undefined && specs.cpuCount !== null) {
         const lowerBoundCpu = filterSapCertified && applyTolerance ? minCpu * 0.85 : minCpu;
-        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity; 
+        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
         cpuMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
       } else if (minCpu !== undefined && specs.cpuCount === null) {
          // If minCpu is specified but instance has no CPU spec, it fails unless minCpu is 0 or less
@@ -211,7 +229,7 @@ export const getMachineInstancesForFamily = (
        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
        cpuFilterMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
     } else if (minCpu !== undefined && specs.cpuCount === null) {
-       cpuFilterMatch = minCpu <= 0; 
+       cpuFilterMatch = minCpu <= 0;
     }
 
     let ramFilterMatch = true;
@@ -389,7 +407,7 @@ export const fetchPricingData = async (
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
-  let responseText = ''; 
+  let responseText = '';
 
   let providerPathSegment = '';
   if (provider === 'Google Cloud') providerPathSegment = 'GCE';
@@ -403,31 +421,31 @@ export const fetchPricingData = async (
       regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
     };
   }
-  
+
   const safeInstanceId = encodeURIComponent(instanceId);
   const safePricingModelValue = encodeURIComponent(pricingModelValue);
   const safeRegionId = encodeURIComponent(regionId);
 
   const gcsDataUrl = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/${providerPathSegment}/${safeRegionId}/${safeInstanceId}/${safePricingModelValue}.json`;
-  
+
   console.log(`[Pricing] Attempting to fetch ${provider} pricing data from GCS: ${gcsDataUrl}`);
 
   try {
-    const response = await fetch(gcsDataUrl, { cache: 'no-store' }); 
-    responseText = await response.text(); 
+    const response = await fetch(gcsDataUrl, { cache: 'no-store' });
+    responseText = await response.text();
 
     if (!response.ok) {
       console.error(`[Pricing] HTTP error fetching ${provider} pricing from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
       console.error(`[Pricing] ${provider} GCS Error Response Body: ${responseText}`);
     } else {
-      const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = JSON.parse(responseText); 
+      const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = JSON.parse(responseText);
       if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
         price = parseFloat(Math.max(0.000001, gcsDataObject.hourlyPrice).toFixed(6));
       } else {
         console.warn(`[Pricing] Hourly price not found or not a number in ${provider} GCS data for ${gcsDataUrl}. Received data:`, gcsDataObject);
       }
     }
-  } catch (error: any) { 
+  } catch (error: any) {
     console.error(`[Pricing] Catch block: Error during fetch or JSON parse for ${provider} ${instanceId} in ${regionId} (${pricingModelValue}) from GCS:`);
     console.error(`  URL: ${gcsDataUrl}`);
     console.error(`  Error Name: ${error.name}`);
@@ -448,4 +466,3 @@ export const fetchPricingData = async (
     pricingModelValue: modelDetails.value,
   };
 };
-
