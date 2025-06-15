@@ -23,6 +23,7 @@ import {
   getMachineInstancesForFamily,
   fetchPricingData,
   getPricingModelsForProvider,
+  loadProviderMetadata, // Import the new loading function
 } from '@/lib/data';
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, CpuDetails } from '@/lib/types';
 
@@ -30,6 +31,8 @@ const HOURS_IN_MONTH = 730;
 
 export default function CloudPriceComparatorPage() {
   const { toast } = useToast();
+
+  const [isMetadataLoading, setIsMetadataLoading] = useState(true);
 
   // Global Custom CPU and RAM filters
   const [customCpu, setCustomCpu] = useState<string>('');
@@ -95,39 +98,57 @@ export default function CloudPriceComparatorPage() {
   const [isAzurePriceLoading, setIsAzurePriceLoading] = useState(false);
   const [isAwsPriceLoading, setIsAwsPriceLoading] = useState(false);
 
-  // Initial population of dropdown options
+  // Load metadata from GCS on component mount
   useEffect(() => {
-    setGoogleGeoOptions(getGeosForProvider('Google Cloud'));
-    setAzureGeoOptions(getGeosForProvider('Azure'));
-    setAwsGeoOptions(getGeosForProvider('AWS'));
+    const initMetadata = async () => {
+      setIsMetadataLoading(true);
+      try {
+        await loadProviderMetadata();
+        // After metadata is loaded, populate initial geo options
+        setGoogleGeoOptions(getGeosForProvider('Google Cloud'));
+        setAzureGeoOptions(getGeosForProvider('Azure'));
+        setAwsGeoOptions(getGeosForProvider('AWS'));
+        
+        setGooglePricingModelOptions(getPricingModelsForProvider('Google Cloud'));
+        setAzurePricingModelOptions(getPricingModelsForProvider('Azure'));
+        setAwsPricingModelOptions(getPricingModelsForProvider('AWS'));
 
-    setGooglePricingModelOptions(getPricingModelsForProvider('Google Cloud'));
-    setAzurePricingModelOptions(getPricingModelsForProvider('Azure'));
-    setAwsPricingModelOptions(getPricingModelsForProvider('AWS'));
-  }, []);
+      } catch (error) {
+        console.error("Failed to load provider metadata:", error);
+        toast({
+          variant: "destructive",
+          title: "Metadata Error",
+          description: "Failed to load provider metadata from GCS. Dropdowns may be empty.",
+        });
+      } finally {
+        setIsMetadataLoading(false);
+      }
+    };
+    initMetadata();
+  }, [toast]);
 
 
-  // Initialize selected geos
-  useEffect(() => {
-    if (googleGeoOptions.length > 0 && !selectedGoogleGeo) {
+  // Initialize selected geos - dependent on metadata loading and geo options population
+ useEffect(() => {
+    if (!isMetadataLoading && googleGeoOptions.length > 0 && !selectedGoogleGeo) {
       const northAmericaOption = googleGeoOptions.find(o => o.value === 'North America');
       setSelectedGoogleGeo(northAmericaOption ? northAmericaOption.value : googleGeoOptions[0].value);
     }
-  }, [googleGeoOptions, selectedGoogleGeo]);
+  }, [googleGeoOptions, selectedGoogleGeo, isMetadataLoading]);
 
   useEffect(() => {
-    if (azureGeoOptions.length > 0 && !selectedAzureGeo) {
+    if (!isMetadataLoading && azureGeoOptions.length > 0 && !selectedAzureGeo) {
       const northAmericaOption = azureGeoOptions.find(o => o.value === 'North America');
       setSelectedAzureGeo(northAmericaOption ? northAmericaOption.value : azureGeoOptions[0].value);
     }
-  }, [azureGeoOptions, selectedAzureGeo]);
+  }, [azureGeoOptions, selectedAzureGeo, isMetadataLoading]);
 
   useEffect(() => {
-    if (awsGeoOptions.length > 0 && !selectedAwsGeo) {
+    if (!isMetadataLoading && awsGeoOptions.length > 0 && !selectedAwsGeo) {
       const northAmericaOption = awsGeoOptions.find(o => o.value === 'North America');
       setSelectedAwsGeo(northAmericaOption ? northAmericaOption.value : awsGeoOptions[0].value);
     }
-  }, [awsGeoOptions, selectedAwsGeo]);
+  }, [awsGeoOptions, selectedAwsGeo, isMetadataLoading]);
 
 
   // ---- START: GEO SELECTION ----
@@ -137,7 +158,7 @@ export default function CloudPriceComparatorPage() {
     setGoogleInstanceOptions([]); setSelectedGoogleInstance('');
     setGoogleCpuDetails(null); setGoogleSapsRating(null); setGooglePriceData(null);
 
-    if (selectedGoogleGeo) {
+    if (selectedGoogleGeo && !isMetadataLoading) {
       const regions = getRegionsForProvider('Google Cloud', selectedGoogleGeo);
       setGoogleRegionOptions(regions);
       if (regions.length > 0) {
@@ -149,7 +170,7 @@ export default function CloudPriceComparatorPage() {
         }
       }
     }
-  }, [selectedGoogleGeo]);
+  }, [selectedGoogleGeo, isMetadataLoading]);
 
   useEffect(() => {
     setAzureRegionOptions([]); setSelectedAzureRegion('');
@@ -157,7 +178,7 @@ export default function CloudPriceComparatorPage() {
     setAzureInstanceOptions([]); setSelectedAzureInstance('');
     setAzureCpuDetails(null); setAzureSapsRating(null); setAzurePriceData(null);
 
-    if (selectedAzureGeo) {
+    if (selectedAzureGeo && !isMetadataLoading) {
       const regions = getRegionsForProvider('Azure', selectedAzureGeo);
       setAzureRegionOptions(regions);
       if (regions.length > 0) {
@@ -169,7 +190,7 @@ export default function CloudPriceComparatorPage() {
         }
       }
     }
-  }, [selectedAzureGeo]);
+  }, [selectedAzureGeo, isMetadataLoading]);
 
   useEffect(() => {
     setAwsRegionOptions([]); setSelectedAwsRegion('');
@@ -177,7 +198,7 @@ export default function CloudPriceComparatorPage() {
     setAwsInstanceOptions([]); setSelectedAwsInstance('');
     setAwsCpuDetails(null); setAwsSapsRating(null); setAwsPriceData(null);
 
-    if (selectedAwsGeo) {
+    if (selectedAwsGeo && !isMetadataLoading) {
       const regions = getRegionsForProvider('AWS', selectedAwsGeo);
       setAwsRegionOptions(regions);
       if (regions.length > 0) {
@@ -189,7 +210,7 @@ export default function CloudPriceComparatorPage() {
         }
       }
     }
-  }, [selectedAwsGeo]);
+  }, [selectedAwsGeo, isMetadataLoading]);
   // ---- END: GEO SELECTION ----
 
   const parsedCustomCpu = customCpu ? parseInt(customCpu) : undefined;
@@ -201,35 +222,35 @@ export default function CloudPriceComparatorPage() {
     setGoogleFamilyGroupOptions([]); setSelectedGoogleFamilyGroup('');
     setGoogleInstanceOptions([]); setSelectedGoogleInstance('');
     setGoogleCpuDetails(null); setGoogleSapsRating(null); setGooglePriceData(null);
-    if (selectedGoogleRegion) {
+    if (selectedGoogleRegion && !isMetadataLoading) {
       const familyGroups = getMachineFamilyGroups('Google Cloud', parsedCustomCpu, parsedCustomRam, filterSapCertified, shouldUseTolerance);
       setGoogleFamilyGroupOptions(familyGroups);
       if (familyGroups.length > 0) setSelectedGoogleFamilyGroup(familyGroups[0].value); else setSelectedGoogleFamilyGroup('');
     }
-  }, [selectedGoogleRegion, customCpu, customRam, filterSapCertified, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance]);
+  }, [selectedGoogleRegion, customCpu, customRam, filterSapCertified, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance, isMetadataLoading]);
 
 
   useEffect(() => {
     setAzureFamilyGroupOptions([]); setSelectedAzureFamilyGroup('');
     setAzureInstanceOptions([]); setSelectedAzureInstance('');
     setAzureCpuDetails(null); setAzureSapsRating(null); setAzurePriceData(null);
-    if (selectedAzureRegion) {
+    if (selectedAzureRegion && !isMetadataLoading) {
        const familyGroups = getMachineFamilyGroups('Azure', parsedCustomCpu, parsedCustomRam, filterSapCertified, shouldUseTolerance);
        setAzureFamilyGroupOptions(familyGroups);
        if (familyGroups.length > 0) setSelectedAzureFamilyGroup(familyGroups[0].value); else setSelectedAzureFamilyGroup('');
     }
-  }, [selectedAzureRegion, customCpu, customRam, filterSapCertified, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance]);
+  }, [selectedAzureRegion, customCpu, customRam, filterSapCertified, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance, isMetadataLoading]);
 
   useEffect(() => {
     setAwsFamilyGroupOptions([]); setSelectedAwsFamilyGroup('');
     setAwsInstanceOptions([]); setSelectedAwsInstance('');
     setAwsCpuDetails(null); setAwsSapsRating(null); setAwsPriceData(null);
-    if (selectedAwsRegion) {
+    if (selectedAwsRegion && !isMetadataLoading) {
       const familyGroups = getMachineFamilyGroups('AWS', parsedCustomCpu, parsedCustomRam, filterSapCertified, shouldUseTolerance);
       setAwsFamilyGroupOptions(familyGroups);
       if (familyGroups.length > 0) setSelectedAwsFamilyGroup(familyGroups[0].value); else setSelectedAwsFamilyGroup('');
     }
-  }, [selectedAwsRegion, customCpu, customRam, filterSapCertified, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance]);
+  }, [selectedAwsRegion, customCpu, customRam, filterSapCertified, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance, isMetadataLoading]);
   // ---- END: REGION / CUSTOM CPU / CUSTOM RAM / SAP FILTER / TOLERANCE FILTER SELECTION ----
 
   const updateCpuDetails = (instances: MachineFamily[], setter: React.Dispatch<React.SetStateAction<CpuDetails | null>>) => {
@@ -245,91 +266,91 @@ export default function CloudPriceComparatorPage() {
   useEffect(() => {
     setGoogleInstanceOptions([]); setSelectedGoogleInstance('');
     setGoogleCpuDetails(null); setGoogleSapsRating(null); setGooglePriceData(null);
-    if (selectedGoogleFamilyGroup) {
+    if (selectedGoogleFamilyGroup && !isMetadataLoading) {
       const instances = getMachineInstancesForFamily('Google Cloud', selectedGoogleFamilyGroup, filterSapCertified, parsedCustomCpu, parsedCustomRam, shouldUseTolerance);
       setGoogleInstanceOptions(instances);
       updateCpuDetails(instances, setGoogleCpuDetails);
       if (instances.length > 0) setSelectedGoogleInstance(instances[0].id); else setSelectedGoogleInstance('');
-    } else {
+    } else if (!isMetadataLoading) { // ensure options are cleared if family group is removed
       setGoogleInstanceOptions([]);
       setSelectedGoogleInstance('');
       setGoogleCpuDetails(null);
     }
-  }, [selectedGoogleFamilyGroup, filterSapCertified, customCpu, customRam, selectedGoogleRegion, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance]);
+  }, [selectedGoogleFamilyGroup, filterSapCertified, customCpu, customRam, selectedGoogleRegion, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance, isMetadataLoading]);
 
   useEffect(() => {
     setAzureInstanceOptions([]); setSelectedAzureInstance('');
     setAzureCpuDetails(null); setAzureSapsRating(null); setAzurePriceData(null);
-    if (selectedAzureFamilyGroup) {
+    if (selectedAzureFamilyGroup && !isMetadataLoading) {
       const instances = getMachineInstancesForFamily('Azure', selectedAzureFamilyGroup, filterSapCertified, parsedCustomCpu, parsedCustomRam, shouldUseTolerance);
       setAzureInstanceOptions(instances);
       updateCpuDetails(instances, setAzureCpuDetails);
       if (instances.length > 0) setSelectedAzureInstance(instances[0].id); else setSelectedAzureInstance('');
-    } else {
+    } else if (!isMetadataLoading) {
         setAzureInstanceOptions([]);
         setSelectedAzureInstance('');
         setAzureCpuDetails(null);
     }
-  }, [selectedAzureFamilyGroup, filterSapCertified, customCpu, customRam, selectedAzureRegion, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance]);
+  }, [selectedAzureFamilyGroup, filterSapCertified, customCpu, customRam, selectedAzureRegion, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance, isMetadataLoading]);
 
   useEffect(() => {
     setAwsInstanceOptions([]); setSelectedAwsInstance('');
     setAwsCpuDetails(null); setAwsSapsRating(null); setAwsPriceData(null);
-    if (selectedAwsFamilyGroup) {
+    if (selectedAwsFamilyGroup && !isMetadataLoading) {
       const instances = getMachineInstancesForFamily('AWS', selectedAwsFamilyGroup, filterSapCertified, parsedCustomCpu, parsedCustomRam, shouldUseTolerance);
       setAwsInstanceOptions(instances);
       updateCpuDetails(instances, setAwsCpuDetails);
       if (instances.length > 0) setSelectedAwsInstance(instances[0].id); else setSelectedAwsInstance('');
-    } else {
+    } else if (!isMetadataLoading) {
         setAwsInstanceOptions([]);
         setSelectedAwsInstance('');
         setAwsCpuDetails(null);
     }
-  }, [selectedAwsFamilyGroup, filterSapCertified, customCpu, customRam, selectedAwsRegion, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance]);
+  }, [selectedAwsFamilyGroup, filterSapCertified, customCpu, customRam, selectedAwsRegion, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance, isMetadataLoading]);
   // ---- END: FAMILY GROUP / SAP FILTER / TOLERANCE FILTER SELECTION ----
 
   // ---- START: INSTANCE SELECTION ----
   useEffect(() => {
     setGooglePriceData(null); setGoogleSapsRating(null);
-    if (selectedGoogleInstance) { 
+    if (selectedGoogleInstance && !isMetadataLoading) { 
         const instance = googleInstanceOptions.find(inst => inst.id === selectedGoogleInstance);
         if (filterSapCertified && instance) {
             setGoogleSapsRating(instance.sapsRating || null);
         } else {
             setGoogleSapsRating(null);
         }
-    } else {
+    } else if (!isMetadataLoading) {
         setGoogleSapsRating(null);
     }
-  }, [selectedGoogleInstance, googleInstanceOptions, filterSapCertified]);
+  }, [selectedGoogleInstance, googleInstanceOptions, filterSapCertified, isMetadataLoading]);
 
   useEffect(() => {
     setAzurePriceData(null); setAzureSapsRating(null);
-    if (selectedAzureInstance) { 
+    if (selectedAzureInstance && !isMetadataLoading) { 
         const instance = azureInstanceOptions.find(inst => inst.id === selectedAzureInstance);
         if (filterSapCertified && instance) {
             setAzureSapsRating(instance.sapsRating || null);
         } else {
             setAzureSapsRating(null);
         }
-    } else {
+    } else if (!isMetadataLoading) {
         setAzureSapsRating(null);
     }
-  }, [selectedAzureInstance, azureInstanceOptions, filterSapCertified]);
+  }, [selectedAzureInstance, azureInstanceOptions, filterSapCertified, isMetadataLoading]);
 
   useEffect(() => {
     setAwsPriceData(null); setAwsSapsRating(null);
-    if (selectedAwsInstance) { 
+    if (selectedAwsInstance && !isMetadataLoading) { 
         const instance = awsInstanceOptions.find(inst => inst.id === selectedAwsInstance);
         if (filterSapCertified && instance) {
             setAwsSapsRating(instance.sapsRating || null);
         } else {
             setAwsSapsRating(null);
         }
-    } else {
+    } else if (!isMetadataLoading) {
         setAwsSapsRating(null);
     }
-  }, [selectedAwsInstance, awsInstanceOptions, filterSapCertified]);
+  }, [selectedAwsInstance, awsInstanceOptions, filterSapCertified, isMetadataLoading]);
   // ---- END: INSTANCE SELECTION ----
 
   // ---- START: PRICING MODEL SELECTION ----
@@ -341,7 +362,7 @@ export default function CloudPriceComparatorPage() {
 
   // Fetch Google Cloud Price
   useEffect(() => {
-    if (selectedGoogleRegion && selectedGoogleInstance && selectedGooglePricingModel) {
+    if (selectedGoogleRegion && selectedGoogleInstance && selectedGooglePricingModel && !isMetadataLoading) {
       setIsGooglePriceLoading(true);
       fetchPricingData('Google Cloud', selectedGoogleRegion, selectedGoogleInstance, selectedGooglePricingModel)
         .then(setGooglePriceData)
@@ -351,14 +372,14 @@ export default function CloudPriceComparatorPage() {
           setGooglePriceData(null);
         })
         .finally(() => setIsGooglePriceLoading(false));
-    } else {
+    } else if (!isMetadataLoading) {
       setGooglePriceData(null);
     }
-  }, [selectedGoogleRegion, selectedGoogleInstance, selectedGooglePricingModel, toast]);
+  }, [selectedGoogleRegion, selectedGoogleInstance, selectedGooglePricingModel, toast, isMetadataLoading]);
 
   // Fetch Azure Price
   useEffect(() => {
-    if (selectedAzureRegion && selectedAzureInstance && selectedAzurePricingModel) {
+    if (selectedAzureRegion && selectedAzureInstance && selectedAzurePricingModel && !isMetadataLoading) {
       setIsAzurePriceLoading(true);
       fetchPricingData('Azure', selectedAzureRegion, selectedAzureInstance, selectedAzurePricingModel)
         .then(setAzurePriceData)
@@ -368,14 +389,14 @@ export default function CloudPriceComparatorPage() {
           setAzurePriceData(null);
         })
         .finally(() => setIsAzurePriceLoading(false));
-    } else {
+    } else if (!isMetadataLoading) {
       setAzurePriceData(null);
     }
-  }, [selectedAzureRegion, selectedAzureInstance, selectedAzurePricingModel, toast]);
+  }, [selectedAzureRegion, selectedAzureInstance, selectedAzurePricingModel, toast, isMetadataLoading]);
 
   // Fetch AWS Price
   useEffect(() => {
-    if (selectedAwsRegion && selectedAwsInstance && selectedAwsPricingModel) {
+    if (selectedAwsRegion && selectedAwsInstance && selectedAwsPricingModel && !isMetadataLoading) {
       setIsAwsPriceLoading(true);
       fetchPricingData('AWS', selectedAwsRegion, selectedAwsInstance, selectedAwsPricingModel)
         .then(setAwsPriceData)
@@ -385,15 +406,15 @@ export default function CloudPriceComparatorPage() {
           setAwsPriceData(null);
         })
         .finally(() => setIsAwsPriceLoading(false));
-    } else {
+    } else if (!isMetadataLoading) {
       setAwsPriceData(null);
     }
-  }, [selectedAwsRegion, selectedAwsInstance, selectedAwsPricingModel, toast]);
+  }, [selectedAwsRegion, selectedAwsInstance, selectedAwsPricingModel, toast, isMetadataLoading]);
 
 
   const renderCpuDetails = (details: CpuDetails | null) => {
     const cpuDetailsWrapperClass = "mt-1 h-5 flex items-center text-xs text-muted-foreground";
-    if (!details || (!details.architecture && !details.clockSpeed)) {
+    if (isMetadataLoading || !details || (!details.architecture && !details.clockSpeed)) {
       return <div className={`${cpuDetailsWrapperClass} text-transparent`}><Cpu size={12} className="mr-1 opacity-0"/>&nbsp;</div>;
     }
     return (
@@ -407,7 +428,7 @@ export default function CloudPriceComparatorPage() {
 
   const renderSapsRating = (rating: number | null, isSapFilterActive: boolean) => {
     const sapsRatingWrapperClass = "mt-1 h-5 flex items-center text-xs text-muted-foreground";
-    if (!isSapFilterActive || rating === null || rating === undefined) {
+    if (isMetadataLoading || !isSapFilterActive || rating === null || rating === undefined) {
       return <div className={`${sapsRatingWrapperClass} text-transparent`}>&nbsp;</div>;
     }
     return (
@@ -425,7 +446,7 @@ export default function CloudPriceComparatorPage() {
     googleBasePriceData: PriceData | null
   ) => {
     const priceDisplayWrapperClass = "mt-2 pt-2 border-t border-dashed";
-    if (isLoading) {
+    if (isLoading || isMetadataLoading) {
       return <div className={`${priceDisplayWrapperClass} flex items-center`}><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading price...</div>;
     }
     if (!priceData || priceData.price === null) {
@@ -487,6 +508,13 @@ export default function CloudPriceComparatorPage() {
         <p className="text-sm text-muted-foreground font-code">*Pricing data (Google Cloud, Azure, AWS) in this interactive tool is calculated based on public information and typical configurations.</p>
       </header>
 
+      {isMetadataLoading && (
+        <div className="flex justify-center items-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin mr-3 text-primary" />
+          <p className="text-muted-foreground">Loading configuration options...</p>
+        </div>
+      )}
+
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle className="font-headline text-2xl">Configuration Filters</CardTitle>
@@ -502,9 +530,10 @@ export default function CloudPriceComparatorPage() {
               onCheckedChange={(checked) => {
                 setFilterSapCertified(checked as boolean);
                 if (!(checked as boolean)) {
-                  setApplyToleranceFilter(false); // Reset tolerance if SAP filter is unchecked
+                  setApplyToleranceFilter(false); 
                 }
               }}
+              disabled={isMetadataLoading}
             />
             <Label htmlFor="sap-filter" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center">
               <ShieldCheck className="mr-2 h-4 w-4 text-green-600" /> Show only SAP Certified Instances
@@ -516,6 +545,7 @@ export default function CloudPriceComparatorPage() {
                 id="tolerance-filter"
                 checked={applyToleranceFilter}
                 onCheckedChange={(checked) => setApplyToleranceFilter(checked as boolean)}
+                disabled={isMetadataLoading}
               />
               <Label htmlFor="tolerance-filter" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
                 Apply +/- 15% Tolerance to CPU/RAM (for SAP Certified)
@@ -527,13 +557,13 @@ export default function CloudPriceComparatorPage() {
                 <Label htmlFor="common-custom-cpu" className="block text-sm font-medium text-foreground mb-1">
                   Min vCPUs (Optional{shouldUseTolerance ? ", +/- 15%" : ""})
                 </Label>
-                <Input id="common-custom-cpu" type="number" placeholder="e.g. 4" value={customCpu} onChange={e => setCustomCpu(e.target.value)} className="h-10 text-sm" />
+                <Input id="common-custom-cpu" type="number" placeholder="e.g. 4" value={customCpu} onChange={e => setCustomCpu(e.target.value)} className="h-10 text-sm" disabled={isMetadataLoading} />
             </div>
             <div>
                 <Label htmlFor="common-custom-ram" className="block text-sm font-medium text-foreground mb-1">
                   Min RAM (GB) (Optional{shouldUseTolerance ? ", +/- 15%" : ""})
                 </Label>
-                <Input id="common-custom-ram" type="number" placeholder="e.g. 16" value={customRam} onChange={e => setCustomRam(e.target.value)} className="h-10 text-sm" />
+                <Input id="common-custom-ram" type="number" placeholder="e.g. 16" value={customRam} onChange={e => setCustomRam(e.target.value)} className="h-10 text-sm" disabled={isMetadataLoading} />
             </div>
           </div>
           
@@ -543,34 +573,34 @@ export default function CloudPriceComparatorPage() {
               <h3 className="text-lg font-medium text-primary flex items-center"><Cloud className="mr-2 h-5 w-5 text-blue-500" />Google Cloud</h3>
               <div>
                 <Label htmlFor="gcp-geo-select" className="block text-sm font-medium text-foreground mb-1">Geography</Label>
-                <Select value={selectedGoogleGeo} onValueChange={setSelectedGoogleGeo} disabled={googleGeoOptions.length === 0}>
-                  <SelectTrigger id="gcp-geo-select"><SelectValue placeholder="Select Geography" /></SelectTrigger>
+                <Select value={selectedGoogleGeo} onValueChange={setSelectedGoogleGeo} disabled={isMetadataLoading || googleGeoOptions.length === 0}>
+                  <SelectTrigger id="gcp-geo-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Geography"} /></SelectTrigger>
                   <SelectContent>{googleGeoOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
                 <Label htmlFor="gcp-region-select" className="block text-sm font-medium text-foreground mb-1">Region</Label>
-                <Select value={selectedGoogleRegion} onValueChange={setSelectedGoogleRegion} disabled={googleRegionOptions.length === 0}>
-                  <SelectTrigger id="gcp-region-select"><SelectValue placeholder="Select Region" /></SelectTrigger>
+                <Select value={selectedGoogleRegion} onValueChange={setSelectedGoogleRegion} disabled={isMetadataLoading || googleRegionOptions.length === 0}>
+                  <SelectTrigger id="gcp-region-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Region"} /></SelectTrigger>
                   <SelectContent>{googleRegionOptions.map(o => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
                 <Label htmlFor="gcp-family-group-select" className="block text-sm font-medium text-foreground mb-1">Machine Family Group</Label>
-                <Select value={selectedGoogleFamilyGroup} onValueChange={setSelectedGoogleFamilyGroup} disabled={googleFamilyGroupOptions.length === 0}>
-                  <SelectTrigger id="gcp-family-group-select"><SelectValue placeholder="Select Family Group" /></SelectTrigger>
+                <Select value={selectedGoogleFamilyGroup} onValueChange={setSelectedGoogleFamilyGroup} disabled={isMetadataLoading || googleFamilyGroupOptions.length === 0}>
+                  <SelectTrigger id="gcp-family-group-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Family Group"} /></SelectTrigger>
                   <SelectContent>{googleFamilyGroupOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
                 {renderCpuDetails(googleCpuDetails)}
               </div>
               <div>
                 <Label htmlFor="gcp-instance-select" className="block text-sm font-medium text-foreground mb-1">Instance</Label>
-                <Select value={selectedGoogleInstance} onValueChange={setSelectedGoogleInstance} disabled={googleInstanceOptions.length === 0}>
-                  <SelectTrigger id="gcp-instance-select"><SelectValue placeholder="Select Instance" /></SelectTrigger>
+                <Select value={selectedGoogleInstance} onValueChange={setSelectedGoogleInstance} disabled={isMetadataLoading || googleInstanceOptions.length === 0}>
+                  <SelectTrigger id="gcp-instance-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Instance"} /></SelectTrigger>
                   <SelectContent>
                     {googleInstanceOptions.length > 0 ?
                       googleInstanceOptions.map(o => <SelectItem key={o.id} value={o.id}>{o.instanceName}</SelectItem>) :
-                      <SelectItem value="no-options" disabled>No instances available{filterSapCertified ? " (SAP Certified)" : ""}{customCpu || customRam ? " for custom specs" : ""}</SelectItem>
+                      <SelectItem value="no-options" disabled>No instances match filters</SelectItem>
                     }
                   </SelectContent>
                 </Select>
@@ -578,7 +608,7 @@ export default function CloudPriceComparatorPage() {
               </div>
               <div>
                 <Label htmlFor="gcp-pricing-model-select" className="block text-sm font-medium text-foreground mb-1">Pricing Model</Label>
-                <Select value={selectedGooglePricingModel} onValueChange={setSelectedGooglePricingModel} disabled={googlePricingModelOptions.length === 0}>
+                <Select value={selectedGooglePricingModel} onValueChange={setSelectedGooglePricingModel} disabled={isMetadataLoading || googlePricingModelOptions.length === 0}>
                   <SelectTrigger id="gcp-pricing-model-select"><SelectValue placeholder="Select Pricing Model" /></SelectTrigger>
                   <SelectContent>{googlePricingModelOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
@@ -591,34 +621,34 @@ export default function CloudPriceComparatorPage() {
               <h3 className="text-lg font-medium text-primary flex items-center"><Cloud className="mr-2 h-5 w-5 text-sky-600" />Azure</h3>
               <div>
                 <Label htmlFor="azure-geo-select" className="block text-sm font-medium text-foreground mb-1">Geography</Label>
-                <Select value={selectedAzureGeo} onValueChange={setSelectedAzureGeo} disabled={azureGeoOptions.length === 0}>
-                  <SelectTrigger id="azure-geo-select"><SelectValue placeholder="Select Geography" /></SelectTrigger>
+                <Select value={selectedAzureGeo} onValueChange={setSelectedAzureGeo} disabled={isMetadataLoading || azureGeoOptions.length === 0}>
+                  <SelectTrigger id="azure-geo-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Geography"} /></SelectTrigger>
                   <SelectContent>{azureGeoOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
                 <Label htmlFor="azure-region-select" className="block text-sm font-medium text-foreground mb-1">Region</Label>
-                <Select value={selectedAzureRegion} onValueChange={setSelectedAzureRegion} disabled={azureRegionOptions.length === 0}>
-                  <SelectTrigger id="azure-region-select"><SelectValue placeholder="Select Region" /></SelectTrigger>
+                <Select value={selectedAzureRegion} onValueChange={setSelectedAzureRegion} disabled={isMetadataLoading || azureRegionOptions.length === 0}>
+                  <SelectTrigger id="azure-region-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Region"} /></SelectTrigger>
                   <SelectContent>{azureRegionOptions.map(o => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
                 <Label htmlFor="azure-family-group-select" className="block text-sm font-medium text-foreground mb-1">Machine Family Group</Label>
-                <Select value={selectedAzureFamilyGroup} onValueChange={setSelectedAzureFamilyGroup} disabled={azureFamilyGroupOptions.length === 0}>
-                  <SelectTrigger id="azure-family-group-select"><SelectValue placeholder="Select Family Group" /></SelectTrigger>
+                <Select value={selectedAzureFamilyGroup} onValueChange={setSelectedAzureFamilyGroup} disabled={isMetadataLoading || azureFamilyGroupOptions.length === 0}>
+                  <SelectTrigger id="azure-family-group-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Family Group"} /></SelectTrigger>
                   <SelectContent>{azureFamilyGroupOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
                 {renderCpuDetails(azureCpuDetails)}
               </div>
               <div>
                 <Label htmlFor="azure-instance-select" className="block text-sm font-medium text-foreground mb-1">Instance</Label>
-                <Select value={selectedAzureInstance} onValueChange={setSelectedAzureInstance} disabled={azureInstanceOptions.length === 0}>
-                  <SelectTrigger id="azure-instance-select"><SelectValue placeholder="Select Instance" /></SelectTrigger>
+                <Select value={selectedAzureInstance} onValueChange={setSelectedAzureInstance} disabled={isMetadataLoading || azureInstanceOptions.length === 0}>
+                  <SelectTrigger id="azure-instance-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Instance"} /></SelectTrigger>
                   <SelectContent>
                     {azureInstanceOptions.length > 0 ?
                       azureInstanceOptions.map(o => <SelectItem key={o.id} value={o.id}>{o.instanceName}</SelectItem>) :
-                      <SelectItem value="no-options" disabled>No instances available{filterSapCertified ? " (SAP Certified)" : ""}{customCpu || customRam ? " for custom specs" : ""}</SelectItem>
+                       <SelectItem value="no-options" disabled>No instances match filters</SelectItem>
                     }
                   </SelectContent>
                 </Select>
@@ -626,7 +656,7 @@ export default function CloudPriceComparatorPage() {
               </div>
                <div>
                 <Label htmlFor="azure-pricing-model-select" className="block text-sm font-medium text-foreground mb-1">Pricing Model</Label>
-                <Select value={selectedAzurePricingModel} onValueChange={setSelectedAzurePricingModel} disabled={azurePricingModelOptions.length === 0}>
+                <Select value={selectedAzurePricingModel} onValueChange={setSelectedAzurePricingModel} disabled={isMetadataLoading || azurePricingModelOptions.length === 0}>
                   <SelectTrigger id="azure-pricing-model-select"><SelectValue placeholder="Select Pricing Model" /></SelectTrigger>
                   <SelectContent>{azurePricingModelOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
@@ -639,34 +669,34 @@ export default function CloudPriceComparatorPage() {
               <h3 className="text-lg font-medium text-primary flex items-center"><Cloud className="mr-2 h-5 w-5 text-orange-500" />AWS</h3>
               <div>
                 <Label htmlFor="aws-geo-select" className="block text-sm font-medium text-foreground mb-1">Geography</Label>
-                <Select value={selectedAwsGeo} onValueChange={setSelectedAwsGeo} disabled={awsGeoOptions.length === 0}>
-                  <SelectTrigger id="aws-geo-select"><SelectValue placeholder="Select Geography" /></SelectTrigger>
+                <Select value={selectedAwsGeo} onValueChange={setSelectedAwsGeo} disabled={isMetadataLoading || awsGeoOptions.length === 0}>
+                  <SelectTrigger id="aws-geo-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Geography"} /></SelectTrigger>
                   <SelectContent>{awsGeoOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
                 <Label htmlFor="aws-region-select" className="block text-sm font-medium text-foreground mb-1">Region</Label>
-                <Select value={selectedAwsRegion} onValueChange={setSelectedAwsRegion} disabled={awsRegionOptions.length === 0}>
-                  <SelectTrigger id="aws-region-select"><SelectValue placeholder="Select Region" /></SelectTrigger>
+                <Select value={selectedAwsRegion} onValueChange={setSelectedAwsRegion} disabled={isMetadataLoading || awsRegionOptions.length === 0}>
+                  <SelectTrigger id="aws-region-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Region"} /></SelectTrigger>
                   <SelectContent>{awsRegionOptions.map(o => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
                 <Label htmlFor="aws-family-group-select" className="block text-sm font-medium text-foreground mb-1">Machine Family Group</Label>
-                <Select value={selectedAwsFamilyGroup} onValueChange={setSelectedAwsFamilyGroup} disabled={awsFamilyGroupOptions.length === 0}>
-                  <SelectTrigger id="aws-family-group-select"><SelectValue placeholder="Select Family Group" /></SelectTrigger>
+                <Select value={selectedAwsFamilyGroup} onValueChange={setSelectedAwsFamilyGroup} disabled={isMetadataLoading || awsFamilyGroupOptions.length === 0}>
+                  <SelectTrigger id="aws-family-group-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Family Group"} /></SelectTrigger>
                   <SelectContent>{awsFamilyGroupOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
                 {renderCpuDetails(awsCpuDetails)}
               </div>
               <div>
                 <Label htmlFor="aws-instance-select" className="block text-sm font-medium text-foreground mb-1">Instance</Label>
-                <Select value={selectedAwsInstance} onValueChange={setSelectedAwsInstance} disabled={awsInstanceOptions.length === 0}>
-                  <SelectTrigger id="aws-instance-select"><SelectValue placeholder="Select Instance" /></SelectTrigger>
+                <Select value={selectedAwsInstance} onValueChange={setSelectedAwsInstance} disabled={isMetadataLoading || awsInstanceOptions.length === 0}>
+                  <SelectTrigger id="aws-instance-select"><SelectValue placeholder={isMetadataLoading? "Loading..." : "Select Instance"} /></SelectTrigger>
                   <SelectContent>
                     {awsInstanceOptions.length > 0 ?
                       awsInstanceOptions.map(o => <SelectItem key={o.id} value={o.id}>{o.instanceName}</SelectItem>) :
-                       <SelectItem value="no-options" disabled>No instances available{filterSapCertified ? " (SAP Certified)" : ""}{customCpu || customRam ? " for custom specs" : ""}</SelectItem>
+                       <SelectItem value="no-options" disabled>No instances match filters</SelectItem>
                     }
                   </SelectContent>
                 </Select>
@@ -674,7 +704,7 @@ export default function CloudPriceComparatorPage() {
               </div>
               <div>
                 <Label htmlFor="aws-pricing-model-select" className="block text-sm font-medium text-foreground mb-1">Pricing Model</Label>
-                <Select value={selectedAwsPricingModel} onValueChange={setSelectedAwsPricingModel} disabled={awsPricingModelOptions.length === 0}>
+                <Select value={selectedAwsPricingModel} onValueChange={setSelectedAwsPricingModel} disabled={isMetadataLoading || awsPricingModelOptions.length === 0}>
                   <SelectTrigger id="aws-pricing-model-select"><SelectValue placeholder="Select Pricing Model" /></SelectTrigger>
                   <SelectContent>{awsPricingModelOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                 </Select>
