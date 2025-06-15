@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { BigQuery } from '@google-cloud/bigquery';
-import type { PriceData, CloudProvider } from '@/lib/types'; // Assuming types are in a shared location
+import type { PriceData } from '@/lib/types';
 
 // IMPORTANT: Configure your Google Cloud Project ID here
 // You might want to use an environment variable for this in a real application
@@ -23,17 +23,16 @@ export async function GET(request: NextRequest) {
 
   // IMPORTANT: Adjust the SQL query to match your actual table schema and column names
   // This query assumes your table has 'hourly_price' and columns for filtering.
-  const query = `
-    SELECT 
-      hourly_price AS price  -- Assuming 'hourly_price' is your price column
-      -- You might also want to select other details if needed by PriceData, but fetchPricingData primarily needs the price
-    FROM \`${PROJECT_ID}.${DATASET_ID}.${TABLE_ID}\`
-    WHERE 
-      region_id = @regionId 
-      AND instance_id = @instanceId 
+  const query = \`
+    SELECT
+      hourly_price AS price
+    FROM \`\${PROJECT_ID}.\${DATASET_ID}.\${TABLE_ID}\`
+    WHERE
+      region_id = @regionId
+      AND instance_id = @instanceId
       AND pricing_model_value = @pricingModelValue
     LIMIT 1;
-  `;
+  \`;
 
   const options = {
     query: query,
@@ -50,31 +49,24 @@ export async function GET(request: NextRequest) {
 
     let price: number | null = null;
     if (rows.length > 0 && rows[0].price !== null && typeof rows[0].price === 'number') {
-      // Ensure price is not extremely small or negative, and format to 6 decimal places
       price = parseFloat(Math.max(0.000001, rows[0].price).toFixed(6));
     } else if (rows.length > 0) {
-        // Log if a row was found but price was not a number or was null
-        console.warn(`[GCE BQ API] Price found for ${instanceId} in ${regionId} (model: ${pricingModelValue}) but was not a number or was null:`, rows[0].price);
+        console.warn(\`[GCE BQ API] Price found for \${instanceId} in \${regionId} (model: \${pricingModelValue}) but was not a number or was null:\`, rows[0].price);
     }
 
-    // Constructing part of the PriceData object.
-    // The full PriceData object (with labels, etc.) is typically constructed by the caller (fetchPricingData)
-    // This API route focuses on returning the core price information.
+
     const responsePayload: Partial<PriceData> = {
         price: price,
-        // The other fields of PriceData will be filled in by the client
-        // ensuring consistency with how GCS-fetched data is handled.
     };
 
     return NextResponse.json(responsePayload, { status: 200 });
 
   } catch (error) {
     console.error('[GCE BQ API] Error querying BigQuery:', error);
-    // Ensure you don't leak sensitive error details to the client in production
     let errorMessage = 'Failed to fetch pricing data from BigQuery.';
-    if (error instanceof Error) {
-        // errorMessage += ` Details: ${error.message}`; // Be cautious with exposing raw error messages
-    }
+    // if (error instanceof Error) { // Avoid sending raw error messages to client in prod
+    //     errorMessage += \` Details: \${error.message}\`;
+    // }
     return NextResponse.json({ error: errorMessage, details: (error as Error).message }, { status: 500 });
   }
 }

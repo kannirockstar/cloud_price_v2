@@ -1,7 +1,6 @@
 
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, PricingModel, CpuDetails } from './types';
 
-// Import metadata from local JSON files
 import gcpRegionsDataJson from '@/metadata_for_gcs/googleCloudRegions.json';
 import azRegionsDataJson from '@/metadata_for_gcs/azureRegions.json';
 import awsRegionsDataJson from '@/metadata_for_gcs/awsRegions.json';
@@ -13,7 +12,6 @@ export let awsRegions: Region[] = [];
 export let machineFamilies: MachineFamily[] = [];
 let metadataLoaded = false;
 
-// This constant is still used for Azure and AWS pricing if those remain on GCS
 const GCS_BUCKET_NAME = 'firestore-cloud-comparator';
 
 export function loadProviderMetadata(): void {
@@ -32,16 +30,14 @@ export function loadProviderMetadata(): void {
     console.log("[Metadata] Provider metadata loading from local files complete.");
   } catch (error) {
     console.error("[Metadata] Error processing local metadata JSON files:", error);
-    // Initialize to empty arrays on error to prevent crashes
     googleCloudRegions = [];
     azureRegions = [];
     awsRegions = [];
     machineFamilies = [];
-    metadataLoaded = false; // Indicate that loading failed
+    metadataLoaded = false;
   }
 }
 
-// Ensure metadata is loaded when the module is first imported/used.
 loadProviderMetadata();
 
 export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
@@ -68,18 +64,18 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   else if (provider === 'AWS') allRegions = awsRegions;
 
   if (geo) {
-    return allRegions.filter(region => region.geo === geo); // Already sorted on load
+    return allRegions.filter(region => region.geo === geo);
   }
-  return allRegions; // Already sorted on load
+  return allRegions;
 };
 
 export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | null, ramInGB: number | null } => {
   let cpuCount: number | null = null;
   if (machine.cpu) {
     if (machine.cpu.toLowerCase().includes('shared')) {
-      cpuCount = 0.5; // Represent shared as 0.5 for filtering, adjust as needed
+      cpuCount = 0.5;
     } else {
-      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/); // Allows for decimal vCPU counts if ever needed
+      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/);
       if (cpuMatch && cpuMatch[1]) {
         cpuCount = parseFloat(cpuMatch[1]);
       }
@@ -115,23 +111,20 @@ export const getMachineFamilyGroups = (
   if (minCpu !== undefined || userMinRamGB !== undefined) {
     filteredMachines = filteredMachines.filter(mf => {
       const specs = parseMachineSpecs(mf);
-
       let cpuMatch = true;
       if (minCpu !== undefined && specs.cpuCount !== null) {
         const lowerBoundCpu = filterSapCertified && applyTolerance ? minCpu * 0.85 : minCpu;
-        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity; // No upper bound if not tolerance
+        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
         cpuMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
-      } else if (minCpu !== undefined && specs.cpuCount === null) { // Handle cases where instance has no CPU spec or custom CPU is 0
-         cpuMatch = minCpu <= 0; // If user wants 0 CPU, null spec could match if considered 0. This logic might need refinement.
+      } else if (minCpu !== undefined && specs.cpuCount === null) {
+         cpuMatch = minCpu <= 0;
       }
-
-
       let ramMatch = true;
       if (userMinRamGB !== undefined && specs.ramInGB !== null) {
         const lowerBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 0.85 : userMinRamGB;
-        const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity; // No upper bound if not tolerance
+        const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity;
         ramMatch = specs.ramInGB >= lowerBoundRam && specs.ramInGB <= upperBoundRam;
-      } else if (userMinRamGB !== undefined && specs.ramInGB === null) { // Handle cases where instance has no RAM spec or custom RAM is 0
+      } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
         ramMatch = userMinRamGB <= 0;
       }
       return cpuMatch && ramMatch;
@@ -141,7 +134,6 @@ export const getMachineFamilyGroups = (
   const families = Array.from(new Set(filteredMachines.map(mf => mf.familyGroup)));
   return families.map(fg => ({ value: fg, label: fg })).sort((a, b) => a.label.localeCompare(b.label));
 };
-
 
 export const getMachineInstancesForFamily = (
   provider: CloudProvider, familyGroup: string, filterSapCertified?: boolean,
@@ -155,7 +147,6 @@ export const getMachineInstancesForFamily = (
     const providerMatch = mf.provider === provider;
     const familyGroupMatch = mf.familyGroup === familyGroup;
     const sapMatch = filterSapCertified ? mf.isSapCertified === true : true;
-
     const specs = parseMachineSpecs(mf);
     let cpuFilterMatch = true;
     if (minCpu !== undefined && specs.cpuCount !== null) {
@@ -165,7 +156,6 @@ export const getMachineInstancesForFamily = (
     } else if (minCpu !== undefined && specs.cpuCount === null) {
        cpuFilterMatch = minCpu <= 0;
     }
-
     let ramFilterMatch = true;
     if (userMinRamGB !== undefined && specs.ramInGB !== null) {
        const lowerBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 0.85 : userMinRamGB;
@@ -174,9 +164,8 @@ export const getMachineInstancesForFamily = (
     } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
         ramFilterMatch = userMinRamGB <= 0;
     }
-
     return providerMatch && familyGroupMatch && sapMatch && cpuFilterMatch && ramFilterMatch;
-  }).sort((a,b) => { // Basic sort, can be expanded
+  }).sort((a,b) => {
         const extractSortKey = (name: string) => {
           const parts = name.toLowerCase().split(/[^a-z0-9.]+/).map(part => {
             const num = parseFloat(part);
@@ -207,7 +196,6 @@ export const getMachineInstancesForFamily = (
         return aParts.length - bParts.length;
     });
 };
-
 
 export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
@@ -297,7 +285,7 @@ export const getPricingModelDetails = (modelValue: string): PricingModel | undef
 export const fetchPricingData = async (
   provider: CloudProvider,
   regionId: string,
-  instanceId: string, // This is machineFamilyId for consistency
+  instanceId: string,
   pricingModelValue: string
 ): Promise<PriceData> => {
   if (!metadataLoaded) {
@@ -305,13 +293,13 @@ export const fetchPricingData = async (
     loadProviderMetadata();
   }
 
-  const modelDetails = getPricingModelDetails(pricingModelValue) || 
-                     pricingModelOptions.find(m => m.value === 'on-demand') || 
+  const modelDetails = getPricingModelDetails(pricingModelValue) ||
+                     pricingModelOptions.find(m => m.value === 'on-demand') ||
                      { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
-  let responseText = ''; // For logging raw response on error
+  let responseText = '';
 
   try {
     if (provider === 'Google Cloud') {
@@ -323,23 +311,20 @@ export const fetchPricingData = async (
       if (!response.ok) {
         console.error(`[Pricing] HTTP error fetching GCE pricing from API (${apiUrl}): ${response.status} ${response.statusText}`);
         console.error(`[Pricing] GCE API Error Response Body: ${responseText}`);
-        // Price remains null
       } else {
         const data: Partial<PriceData> = JSON.parse(responseText);
         if (data.price !== undefined) {
-            price = data.price;
+          price = data.price;
         } else {
-            console.warn(`[Pricing] Price not found in GCE API response for ${apiUrl}. Received:`, data);
+          console.warn(`[Pricing] Price not found in GCE API response for ${apiUrl}. Received:`, data);
         }
       }
-    } else { // AWS and Azure (if not also moved to an API route)
+    } else {
       let providerPathSegment = '';
       if (provider === 'Azure') providerPathSegment = 'azure_prices_python';
       else if (provider === 'AWS') providerPathSegment = 'EC2';
 
       if (providerPathSegment) {
-        // Construct GCS URL for AWS/Azure pricing data
-        // Example: gs://firestore-cloud-comparator/EC2/us-east-1/aws-m5-large/on-demand.json
         const gcsDataUrl = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/${providerPathSegment}/${regionId}/${instanceId}/${pricingModelValue}.json`;
         console.log(`[Pricing] Attempting to fetch ${provider} pricing data from GCS: ${gcsDataUrl}`);
         const response = await fetch(gcsDataUrl, { cache: 'no-store' });
@@ -348,9 +333,8 @@ export const fetchPricingData = async (
         if (!response.ok) {
           console.error(`[Pricing] HTTP error fetching ${provider} pricing from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
           console.error(`[Pricing] ${provider} GCS Error Response Body: ${responseText}`);
-          // Price remains null
         } else {
-            const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = JSON.parse(responseText); // Assuming the GCS JSON has an hourlyPrice field
+            const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = JSON.parse(responseText);
             if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
                 price = parseFloat(Math.max(0.000001, gcsDataObject.hourlyPrice).toFixed(6));
             } else {
@@ -367,7 +351,6 @@ export const fetchPricingData = async (
     console.error(`  Error Message: ${error.message}`);
     if (error.stack) console.error('  Error stack:', error.stack);
     if (responseText) console.error(`  Raw text content (first 500 chars) that may have caused parsing error: ${responseText.substring(0, 500)}`);
-    // Price remains null
   }
 
   console.log(`[Pricing] Result for ${provider} ${instanceId} in ${regionId} (${pricingModelValue}): Price = ${price}`);
@@ -375,7 +358,7 @@ export const fetchPricingData = async (
     provider,
     machineFamilyId: instanceId,
     machineFamilyName,
-    price, // Can be null if fetch fails or price is not found
+    price,
     regionId,
     regionName,
     pricingModelLabel: modelDetails.label,
