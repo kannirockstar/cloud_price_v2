@@ -13,19 +13,41 @@ let metadataLoaded = false;
 async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   const url = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`;
   console.log(`Fetching metadata file: ${url}`);
+  let response: Response;
   try {
-    const response = await fetch(url);
+    response = await fetch(url);
     if (!response.ok) {
       console.error(`Failed to fetch metadata file ${fileName}: ${response.status} ${response.statusText} from ${url}`);
-      // Attempt to get more details from the response if it exists, even if not ok
       try {
         const errorBody = await response.text();
-        console.error(`Response body for failed fetch: ${errorBody}`);
+        console.error(`Response body for failed fetch of ${fileName}: ${errorBody}`);
       } catch (bodyError) {
-        console.error('Could not read response body for failed fetch.');
+        console.error(`Could not read response body for failed fetch of ${fileName}.`);
       }
       return null;
     }
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.warn(`Warning: Metadata file ${fileName} from ${url} is not of type application/json. Content-Type: ${contentType}`);
+      const textContent = await response.text();
+      console.warn(`Raw text content of ${fileName}:\n${textContent}`);
+      // Attempt to parse anyway, but be ready for it to fail
+      try {
+        const data = JSON.parse(textContent);
+        if (!Array.isArray(data)) {
+          console.error(`Parsed non-JSON content of ${fileName} from ${url} did not result in an array. Data received:`, data);
+          return null;
+        }
+        console.log(`Successfully parsed non-JSON content (after warning) for ${fileName} from ${url}. Items: ${data.length}`);
+        return data as T[];
+      } catch (parseError) {
+        console.error(`Error parsing non-JSON content of ${fileName} from ${url}:`, parseError);
+        return null;
+      }
+    }
+
+    // If content type is application/json, proceed to parse
     const data = await response.json();
     if (!Array.isArray(data)) {
         console.error(`Metadata file ${fileName} from ${url} did not return an array. Data received:`, data);
@@ -33,15 +55,18 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
     }
     console.log(`Successfully fetched and parsed ${fileName} from ${url}. Items: ${data.length}`);
     return data as T[];
+
   } catch (error) {
     console.error(`Catch block: Error fetching or parsing metadata file ${fileName} from ${url}:`);
     if (error instanceof Error) {
         console.error('Error name:', error.name);
         console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
+        if (error.stack) {
+         console.error('Error stack:', error.stack);
+        }
     }
-    if (error instanceof TypeError) { // TypeError is common for network errors / CORS
-        console.error('This is a TypeError, often indicating a network issue or CORS problem. Check browser Network tab for details.');
+    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
+        console.error('This is a "Failed to fetch" TypeError, often indicating a network issue or CORS problem. Check browser Network tab for details on the request to GCS.');
     }
     // Attempt to stringify the error for more details, handling circular references
     try {
@@ -71,7 +96,7 @@ export async function loadProviderMetadata(): Promise<void> {
     return;
   }
   console.log("Loading provider metadata from GCS...");
-  
+
   const [gcpRegionsData, azRegionsData, awsRegionsData, mfData] = await Promise.all([
     fetchMetadataFile<Region>('googleCloudRegions.json'),
     fetchMetadataFile<Region>('azureRegions.json'),
@@ -83,13 +108,13 @@ export async function loadProviderMetadata(): Promise<void> {
   azureRegions = azRegionsData || [];
   awsRegions = awsRegionsData || [];
   machineFamilies = mfData || [];
-  
-  metadataLoaded = true; // Set this regardless of individual file success to avoid re-fetching constantly on errors.
+
+  metadataLoaded = true;
   console.log("Provider metadata loading attempt complete from GCS.");
-  console.log("Loaded Google Cloud Regions:", googleCloudRegions.length, googleCloudRegions.length > 0 ? googleCloudRegions[0] : '(empty or failed to load)');
-  console.log("Loaded Azure Regions:", azureRegions.length, azureRegions.length > 0 ? azureRegions[0] : '(empty or failed to load)');
-  console.log("Loaded AWS Regions:", awsRegions.length, awsRegions.length > 0 ? awsRegions[0] : '(empty or failed to load)');
-  console.log("Loaded Machine Families (all providers):", machineFamilies.length, machineFamilies.length > 0 ? machineFamilies[0] : '(empty or failed to load)');
+  console.log("Loaded Google Cloud Regions:", googleCloudRegions.length, googleCloudRegions.length > 0 ? `First region: ${googleCloudRegions[0].id}` : '(empty or failed to load)');
+  console.log("Loaded Azure Regions:", azureRegions.length, azureRegions.length > 0 ? `First region: ${azureRegions[0].id}` : '(empty or failed to load)');
+  console.log("Loaded AWS Regions:", awsRegions.length, awsRegions.length > 0 ? `First region: ${awsRegions[0].id}` : '(empty or failed to load)');
+  console.log("Loaded Machine Families (all providers):", machineFamilies.length, machineFamilies.length > 0 ? `First family: ${machineFamilies[0].id}` : '(empty or failed to load)');
 }
 
 
@@ -101,7 +126,7 @@ export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
 
   console.log(`getGeosForProvider for ${provider}: source regions array length = ${regions.length}`);
   if (regions.length > 0) {
-    console.log(`First region for ${provider} in getGeosForProvider:`, regions[0]);
+    console.log(`First region for ${provider} in getGeosForProvider: id=${regions[0].id}, name=${regions[0].name}, geo=${regions[0].geo}`);
   }
 
   if (regions.length === 0 && metadataLoaded) {
@@ -176,7 +201,7 @@ export const getMachineFamilyGroups = (
     console.warn(`Metadata not yet loaded when getMachineFamilyGroups for ${provider} was called. Machine family groups for ${provider} will be empty initially.`);
     return [];
   }
-  
+
   let filteredMachines = machineFamilies.filter(mf => mf.provider === provider);
 
   if (filterSapCertified) {
