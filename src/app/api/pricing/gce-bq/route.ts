@@ -3,39 +3,52 @@ import { NextRequest, NextResponse } from 'next/server';
 import { BigQuery } from '@google-cloud/bigquery';
 import type { PriceData } from '@/lib/types';
 
-// Environment variables for BigQuery configuration
-const GCP_PROJECT_ID = process.env.BIGQUERY_PROJECT_ID;
-const BIGQUERY_DATASET_ID = process.env.BIGQUERY_DATASET_ID;
-const BIGQUERY_GCE_TABLE_ID = process.env.BIGQUERY_GCE_TABLE_ID;
+// Attempt to read environment variables at the module scope for early logging
+const initialProjectId = process.env.BIGQUERY_PROJECT_ID;
+const initialDatasetId = process.env.BIGQUERY_DATASET_ID;
+const initialTableId = process.env.BIGQUERY_GCE_TABLE_ID;
+
+console.log(`[GCE BQ API - Module Load] BIGQUERY_PROJECT_ID: ${initialProjectId ? 'SET (to: ' + initialProjectId + ')' : 'NOT SET'}`);
+console.log(`[GCE BQ API - Module Load] BIGQUERY_DATASET_ID: ${initialDatasetId ? 'SET (to: ' + initialDatasetId + ')' : 'NOT SET'}`);
+console.log(`[GCE BQ API - Module Load] BIGQUERY_GCE_TABLE_ID: ${initialTableId ? 'SET (to: ' + initialTableId + ')' : 'NOT SET'}`);
 
 let bigquery: BigQuery | undefined;
 
-if (GCP_PROJECT_ID) {
-  try {
-    bigquery = new BigQuery({ projectId: GCP_PROJECT_ID });
-  } catch (error) {
-    console.error('[GCE BQ API] Error initializing BigQuery with explicit project ID:', error);
-    // Fallback or further error handling can be done here
-  }
-} else {
-  console.warn("[GCE BQ API] BIGQUERY_PROJECT_ID is not set. Attempting to initialize BigQuery client without explicit project ID (this may succeed in some GCP environments like Cloud Run).");
-  try {
-    bigquery = new BigQuery();
-  } catch (error) {
-    console.error('[GCE BQ API] Error initializing BigQuery without explicit project ID:', error);
-  }
-}
-
-
 export async function GET(request: NextRequest) {
-  if (!GCP_PROJECT_ID || !BIGQUERY_DATASET_ID || !BIGQUERY_GCE_TABLE_ID) {
-    console.error('[GCE BQ API] Missing required environment variables: BIGQUERY_PROJECT_ID, BIGQUERY_DATASET_ID, or BIGQUERY_GCE_TABLE_ID');
-    return NextResponse.json({ error: 'Server configuration error: Missing BigQuery connection details. Please set BIGQUERY_PROJECT_ID, BIGQUERY_DATASET_ID, and BIGQUERY_GCE_TABLE_ID environment variables.' }, { status: 500 });
+  // Re-read environment variables within the request handler to ensure they are current if changed
+  const PROJECT_ID = process.env.BIGQUERY_PROJECT_ID;
+  const DATASET_ID = process.env.BIGQUERY_DATASET_ID;
+  const TABLE_ID = process.env.BIGQUERY_GCE_TABLE_ID;
+
+  console.log('[GCE BQ API] Received GET request. Processing...');
+  console.log(`[GCE BQ API] Runtime BIGQUERY_PROJECT_ID: ${PROJECT_ID}`);
+  console.log(`[GCE BQ API] Runtime BIGQUERY_DATASET_ID: ${DATASET_ID}`);
+  console.log(`[GCE BQ API] Runtime BIGQUERY_GCE_TABLE_ID: ${TABLE_ID}`);
+
+  if (!PROJECT_ID || !DATASET_ID || !TABLE_ID) {
+    const missingVars = [];
+    if (!PROJECT_ID) missingVars.push('BIGQUERY_PROJECT_ID');
+    if (!DATASET_ID) missingVars.push('BIGQUERY_DATASET_ID');
+    if (!TABLE_ID) missingVars.push('BIGQUERY_GCE_TABLE_ID');
+    const errorMsg = `Server configuration error: Missing required BigQuery connection details. Please set the following environment variables: ${missingVars.join(', ')}.`;
+    console.error(`[GCE BQ API] Error: ${errorMsg}`);
+    return NextResponse.json({ error: errorMsg, details: `Missing: ${missingVars.join(', ')}` }, { status: 500 });
   }
 
-  if (!bigquery) {
-    console.error('[GCE BQ API] BigQuery client not initialized. This likely means there was an issue during setup, or BIGQUERY_PROJECT_ID was not set and could not be inferred in a non-GCP environment.');
-    return NextResponse.json({ error: 'Server configuration error: BigQuery client not initialized.' }, { status: 500 });
+  console.log('[GCE BQ API] Environment variables seem present. Attempting to initialize BigQuery client...');
+
+  // Initialize BigQuery client if not already done, or if project ID changed (though unlikely for env vars)
+  // This instance-level check for `bigquery` is mostly for subsequent calls if the API route instance is reused.
+  if (!bigquery || (bigquery as any).projectId !== PROJECT_ID) {
+    try {
+      bigquery = new BigQuery({ projectId: PROJECT_ID });
+      console.log(`[GCE BQ API] BigQuery client initialized successfully for project ID: ${PROJECT_ID}.`);
+    } catch (error) {
+      console.error('[GCE BQ API] Critical Error: Failed to initialize BigQuery client:', error);
+      return NextResponse.json({ error: 'Server configuration error: Could not initialize BigQuery client.', details: (error as Error).message }, { status: 500 });
+    }
+  } else {
+     console.log('[GCE BQ API] Using existing BigQuery client instance.');
   }
 
   const { searchParams } = new URL(request.url);
@@ -50,7 +63,7 @@ export async function GET(request: NextRequest) {
   const query = `
     SELECT
       hourly_price AS price
-    FROM \`${GCP_PROJECT_ID}.${BIGQUERY_DATASET_ID}.${BIGQUERY_GCE_TABLE_ID}\`
+    FROM \`${PROJECT_ID}.${DATASET_ID}.${TABLE_ID}\`
     WHERE
       region_id = @regionId
       AND instance_id = @instanceId
@@ -60,7 +73,7 @@ export async function GET(request: NextRequest) {
 
   const options = {
     query: query,
-    location: 'US', // Or your BigQuery dataset location - consider making this an ENV VAR too if it varies
+    location: 'US', // IMPORTANT: Or your BigQuery dataset location - consider making this an ENV VAR too if it varies
     params: {
       regionId: regionId,
       instanceId: instanceId,
@@ -68,12 +81,15 @@ export async function GET(request: NextRequest) {
     },
   };
 
+  console.log(`[GCE BQ API] Executing BigQuery query for region: ${regionId}, instance: ${instanceId}, model: ${pricingModelValue}`);
+
   try {
     const [rows] = await bigquery.query(options);
 
     let price: number | null = null;
     if (rows.length > 0 && rows[0].price !== null && typeof rows[0].price === 'number') {
       price = parseFloat(Math.max(0.000001, rows[0].price).toFixed(6));
+      console.log(`[GCE BQ API] Price found: ${price}`);
     } else if (rows.length > 0) {
         console.warn(`[GCE BQ API] Price found for ${instanceId} in ${regionId} (model: ${pricingModelValue}) but was not a number or was null:`, rows[0].price);
     } else {
@@ -82,6 +98,7 @@ export async function GET(request: NextRequest) {
 
     const responsePayload: Partial<PriceData> = {
         price: price,
+        // Note: Other PriceData fields like machineFamilyName, regionName, pricingModelLabel are usually added by the client calling this API
     };
 
     return NextResponse.json(responsePayload, { status: 200 });
@@ -92,3 +109,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: errorMessage, details: (error as Error).message }, { status: 500 });
   }
 }
+
