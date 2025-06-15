@@ -18,7 +18,7 @@ export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   else if (provider === 'AWS') regions = awsRegions;
 
   if (regions.length === 0) {
-    console.warn(`No regions defined for provider ${provider}, returning empty geo options. This data is intended to be sourced from GCS.`);
+    console.warn(`No regions defined for provider ${provider}, returning empty geo options. This data is intended to be sourced from GCS or other means.`);
     return [];
   }
   const geos = Array.from(new Set(regions.map(r => r.geo)));
@@ -32,7 +32,7 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   else if (provider === 'AWS') allRegions = awsRegions;
 
   if (allRegions.length === 0) {
-    console.warn(`No regions defined for provider ${provider}, returning empty region list. This data is intended to be sourced from GCS.`);
+    console.warn(`No regions defined for provider ${provider}, returning empty region list. This data is intended to be sourced from GCS or other means.`);
     return [];
   }
 
@@ -78,10 +78,8 @@ export const getMachineFamilyGroups = (
   filterSapCertified?: boolean,
   applyTolerance?: boolean
 ): SelectOption[] => {
-  // This function now returns empty as machineFamilies is purged.
-  // It needs to be updated to fetch/use data from GCS if this filtering is still required.
   if (machineFamilies.length === 0) {
-    console.warn(`machineFamilies is empty. Filtering for provider ${provider} relies on GCS data for machine family groups.`);
+    console.warn(`machineFamilies is empty. Filtering for provider ${provider} relies on GCS data or other means for machine family groups.`);
     return [];
   }
   
@@ -135,10 +133,8 @@ export const getMachineInstancesForFamily = (
   userMinRamGB?: number,
   applyTolerance?: boolean
 ): MachineFamily[] => {
-  // This function now returns empty as machineFamilies is purged.
-  // It needs to be updated to fetch/use data from GCS if this filtering is still required.
    if (machineFamilies.length === 0) {
-    console.warn(`machineFamilies is empty. Filtering for provider ${provider} and familyGroup ${familyGroup} relies on GCS data for instances.`);
+    console.warn(`machineFamilies is empty. Filtering for provider ${provider} and familyGroup ${familyGroup} relies on GCS data or other means for instances.`);
     return [];
   }
   return machineFamilies
@@ -274,10 +270,10 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
 };
 
 const getInstanceFullDescription = (provider: CloudProvider, instanceId: string): string => {
-  // This function will need to be updated to use data from GCS
-  // or the UI needs to be adapted if this level of detail isn't in GCS.
   const mf = machineFamilies.find(m => m.id === instanceId && m.provider === provider);
-  return mf ? mf.fullDescription : `${provider} Instance ${instanceId} (Details from GCS)`;
+  // If machineFamilies is empty (due to purging), this will return a placeholder.
+  // This metadata might also need to be fetched from GCS or another source.
+  return mf ? mf.fullDescription : `${provider} Instance ${instanceId} (Details from GCS/metadata source)`;
 };
 
 export const getRegionNameById = (provider: CloudProvider, regionId: string): string => {
@@ -286,7 +282,9 @@ export const getRegionNameById = (provider: CloudProvider, regionId: string): st
   else if (provider === 'Azure') regions = azureRegions;
   else if (provider === 'AWS') regions = awsRegions;
   const region = regions.find(r => r.id === regionId);
-  return region ? region.name : `${provider} Region ${regionId} (Details from GCS)`;
+  // If region arrays are empty (due-to purging), this will return a placeholder.
+  // This metadata might also need to be fetched from GCS or another source.
+  return region ? region.name : `${provider} Region ${regionId} (Details from GCS/metadata source)`;
 }
 
 export const getPricingModelDetails = (modelValue: string): PricingModel | undefined => {
@@ -300,63 +298,75 @@ export const fetchPricingData = async (
   pricingModelValue: string
 ): Promise<PriceData> => {
   let providerPathSegment = '';
-
-  if (provider === 'AWS') {
-    providerPathSegment = 'EC2';
-  } else if (provider === 'Google Cloud') {
-    providerPathSegment = 'GCE'; 
+  if (provider === 'Google Cloud') {
+    providerPathSegment = 'GCE';
   } else if (provider === 'Azure') {
     providerPathSegment = 'azure_prices_python';
+  } else if (provider === 'AWS') {
+    providerPathSegment = 'EC2';
   }
 
-  // Construct the GCS URL. Ensure the sub-path (/${regionId}/${instanceId}/${pricingModelValue}.json)
-  // matches your actual file naming convention within the provider-specific folders.
   const gcsDataUrl = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/${providerPathSegment}/${regionId}/${instanceId}/${pricingModelValue}.json`;
-  
   console.log(`Attempting to fetch pricing data from GCS: ${gcsDataUrl}`);
-  
-  // Simulate network delay. Replace with actual fetch call.
-  await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
 
-  // --- BEGIN Placeholder Logic for fetching and parsing ---
-  // In a real application, you would:
-  // 1. Fetch data from `gcsDataUrl`:
-  //    const response = await fetch(gcsDataUrl);
-  //    if (!response.ok) {
-  //      console.error(`Failed to fetch from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
-  //      throw new Error(`Failed to fetch GCS data for ${provider} ${instanceId} in ${regionId}`);
-  //    }
-  //    const gcsDataObject = await response.json();
-  // 2. Parse `gcsDataObject` and map it to the `PriceData` structure.
-  //    The structure of `gcsDataObject` depends entirely on how you store data in GCS.
-  //    For example, it might contain { "hourlyPrice": 0.123, "pricingModelName": "On-Demand", ... }
+  const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
+  const machineFamilyName = getInstanceFullDescription(provider, instanceId);
+  const regionName = getRegionNameById(provider, regionId);
 
-  // For now, returning placeholder data based on the selected model's discount factor:
-  const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0};
-  const machineFamilyName = getInstanceFullDescription(provider, instanceId); // Still uses potentially purged machineFamilies
-  const regionName = getRegionNameById(provider, regionId); // Still uses potentially purged region data
+  try {
+    const response = await fetch(gcsDataUrl);
+    if (!response.ok) {
+      console.error(`Failed to fetch from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
+      // You might want to throw an error or return a specific error structure
+      return {
+        provider,
+        machineFamilyId: instanceId,
+        machineFamilyName,
+        price: null, // Indicate failure
+        regionId,
+        regionName,
+        pricingModelLabel: modelDetails.label,
+        pricingModelValue: modelDetails.value,
+      };
+    }
+    // Assuming the GCS JSON object has a field like "hourlyPrice"
+    // Adjust "hourlyPrice" to match the actual field name in your JSON files.
+    const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = await response.json();
 
-  // Example: Generate a mock price for demonstration. Replace with actual GCS data.
-  // The discountFactor is applied here as an example; your GCS data might already be discounted, or structured differently.
-  const baseMockPrice = (instanceId.length % 10) * 0.1 + (regionId.length % 5) * 0.05 + 0.05; // Consistent-ish random base
-  let calculatedPrice = baseMockPrice * modelDetails.discountFactor;
-  
-  // Add a small random fluctuation to make it seem more dynamic for now
-  calculatedPrice = calculatedPrice * (1 + (Math.random() - 0.5) * 0.02);
+    let finalPrice = null;
+    if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
+      // The discountFactor from pricingModelOptions is an example.
+      // If your GCS data is already pre-calculated for different pricing models,
+      // you might not need to apply this discountFactor here.
+      // Or, your GCS JSON might contain the specific price for the specific pricingModelValue.
+      finalPrice = gcsDataObject.hourlyPrice * modelDetails.discountFactor;
+      finalPrice = parseFloat(Math.max(0.000001, finalPrice).toFixed(6))
+    } else {
+      console.warn(`Hourly price not found or not a number in GCS data for ${gcsDataUrl}`);
+    }
 
+    return {
+      provider,
+      machineFamilyId: instanceId,
+      machineFamilyName,
+      price: finalPrice,
+      regionId,
+      regionName,
+      pricingModelLabel: modelDetails.label,
+      pricingModelValue: modelDetails.value,
+    };
 
-  const fetchedPriceData: PriceData = {
-    provider,
-    machineFamilyId: instanceId,
-    machineFamilyName, // This will be a placeholder if machineFamilies is empty
-    price: parseFloat(Math.max(0.000001, calculatedPrice).toFixed(6)), // Placeholder price
-    regionId,
-    regionName, // This will be a placeholder if region data is empty
-    pricingModelLabel: modelDetails.label,
-    pricingModelValue: modelDetails.value,
-  };
-  // --- END Placeholder Logic ---
-
-  // console.log("Fetched (mocked) PriceData:", fetchedPriceData);
-  return fetchedPriceData;
+  } catch (error) {
+    console.error(`Error during fetch or parsing for ${gcsDataUrl}:`, error);
+    return {
+      provider,
+      machineFamilyId: instanceId,
+      machineFamilyName,
+      price: null, // Indicate failure
+      regionId,
+      regionName,
+      pricingModelLabel: modelDetails.label,
+      pricingModelValue: modelDetails.value,
+    };
+  }
 };
