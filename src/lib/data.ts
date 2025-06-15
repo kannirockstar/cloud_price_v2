@@ -1,95 +1,82 @@
 
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, PricingModel, CpuDetails } from './types';
 
-const GCS_BUCKET_NAME = 'firestore-cloud-comparator';
-
 // These will be populated by loadProviderMetadata
 export let googleCloudRegions: Region[] = [];
 export let azureRegions: Region[] = [];
 export let awsRegions: Region[] = [];
 export let machineFamilies: MachineFamily[] = [];
 let metadataLoaded = false;
+const GCS_BUCKET_NAME = 'firestore-cloud-comparator';
 
 async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   const url = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`;
-  console.log(`Fetching metadata file: ${url}`);
-  let response: Response;
+  console.log(`[${fileName}] Attempting to fetch metadata from: ${url}`);
+  
+  let responseText: string;
   try {
-    response = await fetch(url);
+    const response = await fetch(url);
 
     if (!response.ok) {
-      console.error(`Failed to fetch metadata file ${fileName}: ${response.status} ${response.statusText} from ${url}`);
+      console.error(`[${fileName}] HTTP error fetching metadata from ${url}. Status: ${response.status} ${response.statusText}`);
+      let errorBody = "";
       try {
-        const errorBody = await response.text();
-        console.error(`Response body for failed fetch of ${fileName} (${response.status}): ${errorBody}`);
-      } catch (bodyError) {
-        console.error(`Could not read response body for failed fetch of ${fileName} (${response.status}).`);
+        errorBody = await response.text();
+        console.error(`[${fileName}] HTTP Error Response Body (Status ${response.status}):\n${errorBody}`);
+      } catch (bodyReadError: any) {
+        console.error(`[${fileName}] Could not read HTTP error response body. Status: ${response.status}. Body Read Error Name: ${bodyReadError.name}, Message: ${bodyReadError.message}`);
       }
       return null;
     }
 
     const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      console.warn(`Warning: Metadata file ${fileName} from ${url} is not of type application/json. Content-Type: ${contentType}`);
-      const textContent = await response.text();
-      console.warn(`Raw text content of ${fileName}:\n${textContent}`);
-      // Attempt to parse anyway, but be ready for it to fail
-      try {
-        const data = JSON.parse(textContent);
-        if (!Array.isArray(data)) {
-          console.error(`Parsed non-JSON content of ${fileName} from ${url} did not result in an array. Data received:`, data);
-          return null;
+    // Allow text/plain if it might be JSON, but warn. Strictly, we expect application/json.
+    if (!contentType || (!contentType.includes('application/json') && !contentType.includes('text/plain'))) {
+        console.warn(`[${fileName}] WARNING: Metadata file from ${url} has unexpected Content-Type: ${contentType}. Expected 'application/json' or 'text/plain'. File will be ignored.`);
+         try {
+            const textContentForWarning = await response.text();
+            console.warn(`[${fileName}] Raw text content (unexpected Content-Type ${contentType}):\n${textContentForWarning}`);
+        } catch (readTextError: any) {
+            console.error(`[${fileName}] Could not read text content of response with unexpected Content-Type. Read Error Name: ${readTextError.name}, Message: ${readTextError.message}`);
         }
-        console.log(`Successfully parsed non-JSON content (after warning) for ${fileName} from ${url}. Items: ${data.length}`);
-        return data as T[];
-      } catch (parseError) {
-        console.error(`Error parsing non-JSON content of ${fileName} from ${url}:`, parseError);
-        return null;
-      }
+        return null; 
     }
+    
+    responseText = await response.text();
 
-    // If content type is application/json, proceed to parse
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-        console.error(`Metadata file ${fileName} from ${url} did not return an array. Data received:`, data);
-        return null;
+  } catch (networkOrTextError: any) {
+    console.error(`[${fileName}] Network error or error reading response text for ${url}:`);
+    console.error(`  Error Name: ${networkOrTextError.name}`);
+    console.error(`  Error Message: ${networkOrTextError.message}`);
+    if (networkOrTextError.stack) {
+      console.error(`  Error Stack: ${networkOrTextError.stack}`);
     }
-    console.log(`Successfully fetched and parsed ${fileName} from ${url}. Items: ${data.length}`);
-    return data as T[];
-
-  } catch (error) {
-    console.error(`Catch block: Error fetching or parsing metadata file ${fileName} from ${url}:`);
-    if (error instanceof Error) {
-        console.error('Error name:', error.name);
-        console.error('Error message:', error.message);
-        if (error.stack) {
-         console.error('Error stack:', error.stack);
-        }
-    }
-    if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
-        console.error('This is a "Failed to fetch" TypeError, often indicating a network issue or CORS problem. Check browser Network tab for details on the request to GCS.');
-    }
-    // Attempt to stringify the error for more details, handling circular references
-    try {
-        const getCircularReplacer = () => {
-            const seen = new WeakSet();
-            return (key: string, value: any) => {
-                if (typeof value === "object" && value !== null) {
-                    if (seen.has(value)) {
-                        return "[Circular]";
-                    }
-                    seen.add(value);
-                }
-                return value;
-            };
-        };
-        console.error('Full error object (stringified):', JSON.stringify(error, getCircularReplacer()));
-    } catch (e) {
-        console.error('Could not stringify the full error object.');
+    if (networkOrTextError.cause) { // Some fetch errors (like TypeErrors in some environments) might have a 'cause'
+        console.error(`  Error Cause:`, networkOrTextError.cause);
     }
     return null;
   }
+
+  try {
+    const data = JSON.parse(responseText);
+    if (!Array.isArray(data)) {
+      console.error(`[${fileName}] Parsed data from ${url} is not an array. Content was logged above if read successfully. Parsed as:`, data);
+      return null;
+    }
+    console.log(`[${fileName}] Successfully fetched and parsed from ${url}. Items: ${data.length}`);
+    return data as T[];
+  } catch (jsonParseError: any) {
+    console.error(`[${fileName}] ERROR parsing JSON content from ${url}:`);
+    console.error(`  Parse Error Name: ${jsonParseError.name}`);
+    console.error(`  Parse Error Message: ${jsonParseError.message}`);
+    if (jsonParseError.stack) {
+        console.error(`  Parse Error Stack: ${jsonParseError.stack}`);
+    }
+    console.error(`  Raw text content that failed JSON parsing for ${fileName} (see above if logged, or below if different):\n${responseText}`);
+    return null;
+  }
 }
+
 
 export async function loadProviderMetadata(): Promise<void> {
   if (metadataLoaded) {
@@ -109,8 +96,9 @@ export async function loadProviderMetadata(): Promise<void> {
   azureRegions = azRegionsData || [];
   awsRegions = awsRegionsData || [];
   machineFamilies = mfData || [];
-
+  
   metadataLoaded = true;
+
   console.log("Provider metadata loading attempt complete from GCS.");
   console.log("Loaded Google Cloud Regions:", googleCloudRegions.length, googleCloudRegions.length > 0 ? `First region: ${googleCloudRegions[0].id}` : '(empty or failed to load)');
   console.log("Loaded Azure Regions:", azureRegions.length, azureRegions.length > 0 ? `First region: ${azureRegions[0].id}` : '(empty or failed to load)');
@@ -163,7 +151,7 @@ export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | 
   let cpuCount: number | null = null;
   if (machine.cpu) {
     if (machine.cpu.toLowerCase().includes('shared')) {
-      cpuCount = 0.5; // Represent shared CPU as 0.5 for filtering purposes
+      cpuCount = 0.5; 
     } else {
       const cpuMatch = machine.cpu.match(/(\d+)/);
       if (cpuMatch && cpuMatch[1]) {
@@ -222,7 +210,7 @@ export const getMachineFamilyGroups = (
           cpuMatch = specs.cpuCount >= minCpu;
         }
       } else if (minCpu !== undefined && specs.cpuCount === null) {
-        cpuMatch = minCpu <= 0; // If minCPU is 0 or less, allow null CPU info
+        cpuMatch = minCpu <= 0; 
       }
 
       let ramMatch = true;
@@ -235,7 +223,7 @@ export const getMachineFamilyGroups = (
           ramMatch = specs.ramInGB >= userMinRamGB;
         }
       } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
-        ramMatch = userMinRamGB <= 0; // If minRAM is 0 or less, allow null RAM info
+        ramMatch = userMinRamGB <= 0; 
       }
       return cpuMatch && ramMatch;
     });
@@ -328,7 +316,6 @@ export const getMachineInstancesForFamily = (
     });
 };
 
-// PricingModelOptions remains hardcoded as it's less dynamic and simpler for now.
 export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
   { value: 'gcp-1yr-cud', label: '1-Year CUD', providers: ['Google Cloud'], discountFactor: 0.70 },
@@ -459,7 +446,7 @@ export const fetchPricingData = async (
 
     let finalPrice = null;
     if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
-      finalPrice = gcsDataObject.hourlyPrice * modelDetails.discountFactor; // Applying discount factor here
+      finalPrice = gcsDataObject.hourlyPrice * modelDetails.discountFactor; 
       finalPrice = parseFloat(Math.max(0.000001, finalPrice).toFixed(6))
     } else {
       console.warn(`Hourly price not found or not a number in GCS data for ${gcsDataUrl}. Received data:`, gcsDataObject);
@@ -476,32 +463,21 @@ export const fetchPricingData = async (
       pricingModelValue: modelDetails.value,
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error(`Catch block: Error fetching or parsing pricing data from ${gcsDataUrl}:`);
     if (error instanceof Error) {
         console.error('Error name:', error.name);
         console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
+        if (error.stack) {
+         console.error('Error stack:', error.stack);
+        }
     }
      if (error instanceof TypeError) {
         console.error('This is a TypeError, often indicating a network issue or CORS problem when fetching pricing data.');
     }
-    try {
-        const getCircularReplacer = () => {
-            const seen = new WeakSet();
-            return (key: string, value: any) => {
-                if (typeof value === "object" && value !== null) {
-                    if (seen.has(value)) {
-                        return "[Circular]";
-                    }
-                    seen.add(value);
-                }
-                return value;
-            };
-        };
-        console.error('Full error object for pricing data fetch (stringified):', JSON.stringify(error, getCircularReplacer()));
-    } catch (e) {
-        console.error('Could not stringify the full error object for pricing data fetch.');
+    // Log the error object itself for more details if it's not an Error instance
+    if (!(error instanceof Error)) {
+        console.error('Full error object (pricing data fetch):', error);
     }
     return {
       provider,
