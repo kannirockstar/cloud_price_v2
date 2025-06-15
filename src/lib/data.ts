@@ -1,7 +1,9 @@
 
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, PricingModel } from './types';
-import { storage } from './firebase'; 
-import { ref, getDownloadURL, type StorageReference } from 'firebase/storage';
+// Firebase storage is no longer used for core metadata in this version,
+// but keep for potential future use or if pricing data direct fetch is re-enabled.
+// import { storage } from './firebase'; 
+// import { ref, getDownloadURL, type StorageReference } from 'firebase/storage';
 
 export let googleCloudRegions: Region[] = [];
 export let azureRegions: Region[] = [];
@@ -58,16 +60,18 @@ export async function loadProviderMetadata(): Promise<void> {
       console.log(`[Metadata] Loaded ${googleCloudRegions.length} GCP regions, ${azureRegions.length} Azure regions, ${awsRegions.length} AWS regions, ${machineFamilies.length} machine families.`);
     
     } catch (error: any) {
-      console.error("[Metadata] CRITICAL OVERALL ERROR during local metadata loading process:", error.message, error);
+      let detailMessage = `[Metadata] CRITICAL OVERALL ERROR during local metadata loading process: ${error.message}.`;
       if (error.message && error.message.toLowerCase().includes("failed to fetch")) {
-        console.error(`[Metadata] 🔴 A "Failed to fetch" error occurred while trying to load core metadata from /public. This is unexpected as these files should be served by the Next.js dev server itself. Potential causes:
-    1. **Build Issue:** The files might not have been correctly copied to the 'public/metadata' directory, or Next.js build process might have an issue. Verify the files exist in 'public/metadata'.
-    2. **Server Not Running/Reachable:** The Next.js development server might not be running correctly or is unreachable from your browser. Check the terminal where 'npm run dev' was executed.
-    3. **Network Configuration:** Extremely restrictive local network configurations (firewalls, proxies) or Cloud Workstation policies could even interfere with localhost or internal traffic, though less common for local static assets.
-    4. **Path Mismatch:** Ensure 'public/metadata/*.json' paths are correct and accessible.`);
+        detailMessage += `🔴 A "Failed to fetch" error occurred while trying to load core metadata from /public. This is unexpected for local static assets. Potential causes:
+    1. **Build Issue:** Files might not be correctly copied to 'public/metadata'. Verify they exist.
+    2. **Server Not Running/Reachable:** The Next.js development server might have issues. Check terminal for 'npm run dev'.
+    3. **Cloud Workstations Network Policy:** Check your workstation's network settings. Egress policies might block even internal/localhost resolution in some very restrictive setups, or there could be a proxy interfering. For Cloud Workstations, ensure network access to 'localhost' or the dev server's IP/port is allowed.
+    4. **Browser Extensions:** Ad blockers or other extensions could interfere. Try incognito mode.
+    5. **Path Mismatch:** Ensure 'public/metadata/*.json' paths are correct.`;
       } else if (error instanceof SyntaxError) {
-        console.error(`[Metadata] 🔴 MALFORMED JSON in one of the local metadata files. Error: ${error.message}. Please validate the JSON content in your 'public/metadata' files.`);
+        detailMessage += `🔴 MALFORMED JSON in one of the local metadata files. Error: ${error.message}. Please validate the JSON content in your 'public/metadata' files.`;
       }
+      console.error(detailMessage, error);
       googleCloudRegions = [];
       azureRegions = [];
       awsRegions = [];
@@ -383,7 +387,6 @@ export const fetchPricingData = async (
       };
   }
 
-
   const modelDetails = getPricingModelDetails(pricingModelValue) ||
                      pricingModelOptions.find(m => m.value === 'on-demand') ||
                      { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; 
@@ -391,76 +394,35 @@ export const fetchPricingData = async (
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
 
-  let gcsFolderPathSegment = '';
-  if (provider === 'Google Cloud') gcsFolderPathSegment = 'GCE';
-  else if (provider === 'Azure') gcsFolderPathSegment = 'azure_prices_python';
-  else if (provider === 'AWS') gcsFolderPathSegment = 'EC2';
-
-  if (!gcsFolderPathSegment) {
-    console.error(`[PricingData] No GCS folder path segment defined for provider ${provider}. Cannot fetch pricing for ${instanceId}.`);
-    return {
-      provider, machineFamilyId: instanceId, machineFamilyName, price: null,
-      regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
-    };
-  }
-
-  const pricingFilePath = `${gcsFolderPathSegment}/${regionId}/${instanceId}/${pricingModelValue}.json`;
-  
-  let downloadURL = '';
+  const apiUrl = `/api/get-pricing-from-gcs?provider=${encodeURIComponent(provider)}&regionId=${encodeURIComponent(regionId)}&instanceId=${encodeURIComponent(instanceId)}&pricingModelValue=${encodeURIComponent(pricingModelValue)}`;
 
   try {
-    if (!storage) {
-      throw new Error("Firebase Storage instance is not available in fetchPricingData. Check Firebase initialization in src/lib/firebase.ts and your .env variables.");
-    }
-    const pricingFileRef = ref(storage, pricingFilePath);
-    console.log(`[PricingData] Getting download URL for ${provider} price: ${pricingFilePath}`);
-    downloadURL = await getDownloadURL(pricingFileRef);
-    console.log(`[PricingData] Attempting to fetch ${provider} pricing for ${instanceId} using downloadURL: ${downloadURL}`); 
-    
-    const response = await fetch(downloadURL, { cache: 'no-store' });
+    console.log(`[PricingData] Fetching from API route: ${apiUrl}`);
+    const response = await fetch(apiUrl, { cache: 'no-store' });
 
     if (!response.ok) {
-      const responseText = await response.text();
-      let detailMessage = `HTTP error fetching ${provider} pricing for ${instanceId} (Path: ${pricingFilePath}, URL: ${downloadURL}): ${response.status} ${response.statusText}. Response: ${responseText}`;
-      if (response.status === 403) {
-        detailMessage += ` A 403 error on a Firebase download URL usually means Firebase Storage rules are denying access. Check your storage.rules for '${pricingFilePath}'.`;
-      } else if (response.status === 404) {
-        detailMessage += ` A 404 error means the file was not found at '${pricingFilePath}' in your Firebase Storage bucket ('${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}') when trying to use the download URL. Verify the file exists.`;
-      }
-      console.error(`[PricingData] ${detailMessage}`);
+      const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from API" }));
+      console.error(`[PricingData] API Error for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${response.status} ${response.statusText}. Details: ${errorData?.error || 'N/A'}`);
+      // Fallback or specific error handling can be done here if needed
     } else {
       const pricingDataObject: { hourlyPrice?: number; [key: string]: any } = await response.json();
       if (pricingDataObject && typeof pricingDataObject.hourlyPrice === 'number') {
         price = parseFloat(Math.max(0.000001, pricingDataObject.hourlyPrice).toFixed(6));
-        console.log(`[PricingData] Successfully fetched and parsed price for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${price}`);
+        console.log(`[PricingData] Successfully fetched and parsed price via API for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${price}`);
       } else {
-        console.warn(`[PricingData] Hourly price not found or not a number in ${provider} data for ${instanceId} (Path: ${pricingFilePath}, URL: ${downloadURL}). Received data:`, pricingDataObject);
+        console.warn(`[PricingData] Hourly price not found or not a number in API response for ${provider} ${instanceId}. Received data:`, pricingDataObject);
       }
     }
   } catch (error: any) {
-    let errorMessage = `[PricingData] Error processing pricing for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}). Path: '${pricingFilePath}'. `;
-     if (downloadURL) {
-        errorMessage += `Attempted Download URL: '${downloadURL}'. `;
-    }
-    if (error.message.toLowerCase().includes('failed to fetch')) {
-      errorMessage += `NETWORK ERROR ("Failed to fetch") or issue with download URL. The browser could not complete the network request. This could be due to:
-    - No internet connection or unstable connection.
-    - DNS resolution failure for the host: '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
-    - **Cloud Workstations Network Policy:** Egress (outbound) network policies on your Cloud Workstation might be blocking access to external URLs like Firebase Storage. Check your workstation's or organization's network configuration.
+     let errorMessage = `[PricingData] Client-side error calling API route for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}). URL: '${apiUrl}'. `;
+    if (error.message && error.message.toLowerCase().includes('failed to fetch')) {
+        errorMessage += `NETWORK ERROR ("Failed to fetch") when calling the Next.js API route. This could be due to:
+    - The Next.js development server not running or being unreachable.
+    - **Cloud Workstations Network Policy:** Egress policies might be blocking access even to the application's own API routes if network isolation is very strict.
     - Local firewall, VPN, or proxy settings on your machine or network.
-    - Browser extensions (like ad-blockers or privacy tools) interfering.
-    - The Firebase Storage service itself might be temporarily unavailable (check Firebase status page).`;
-    } else if (error.message.includes('storage/object-not-found') || (error.code && error.code === 'storage/object-not-found')) {
-      errorMessage += `FILE NOT FOUND in Firebase Storage at path '${pricingFilePath}'. Please verify the file exists and the path is correct. Bucket: '${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}'.`;
-    } else if (error.message.includes('storage/unauthorized') || (error.code && error.code === 'storage/unauthorized')) {
-      errorMessage += `UNAUTHORIZED to access file '${pricingFilePath}' in Firebase Storage (e.g. via getDownloadURL). Check Firebase Storage rules (storage.rules). They might be denying read access.`;
-    } else if (error instanceof SyntaxError) { 
-       errorMessage += `MALFORMED JSON in pricing file '${pricingFilePath}'. Please validate the JSON content.`;
-    } else if (error.message.includes('Firebase Storage:')) { 
-      errorMessage += `FIREBASE STORAGE SDK ERROR: ${error.message} (Code: ${error.code || 'N/A'}). This could be an issue with initialization, permissions, or the file itself.`;
-    }
-    else {
-      errorMessage += `Details: ${error.message}. Full error object: ${JSON.stringify(error)}. Code: ${error.code || 'N/A'}`;
+    - Browser extensions (like ad-blockers or privacy tools) interfering.`;
+    } else {
+        errorMessage += `Details: ${error.message}.`;
     }
     console.error(errorMessage, error);
   }
@@ -476,4 +438,3 @@ export const fetchPricingData = async (
     pricingModelValue: modelDetails.value,
   };
 };
-
