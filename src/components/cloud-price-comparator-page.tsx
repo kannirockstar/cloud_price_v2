@@ -23,7 +23,7 @@ import {
   getMachineInstancesForFamily,
   fetchPricingData,
   getPricingModelsForProvider,
-  loadProviderMetadata,
+  loadProviderMetadata, // Import loadProviderMetadata
 } from '@/lib/data';
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, CpuDetails } from '@/lib/types';
 
@@ -104,7 +104,7 @@ export default function CloudPriceComparatorPage() {
       console.log('CloudPriceComparatorPage: Starting initMetadata...');
       setIsMetadataLoading(true);
       try {
-        await loadProviderMetadata();
+        await loadProviderMetadata(); // Await the GCS fetch
         console.log('CloudPriceComparatorPage: loadProviderMetadata finished.');
 
         const gcpGeos = getGeosForProvider('Google Cloud');
@@ -130,7 +130,7 @@ export default function CloudPriceComparatorPage() {
         toast({
           variant: "destructive",
           title: "Metadata Error",
-          description: "Failed to load provider metadata from GCS. Dropdowns may be empty or non-functional.",
+          description: "Failed to load provider metadata from GCS. Dropdowns may be empty or non-functional. Please ensure GCS files are correctly placed in 'metadata/' folder and publicly accessible.",
         });
       } finally {
         console.log('CloudPriceComparatorPage: Setting isMetadataLoading to false.');
@@ -389,7 +389,7 @@ export default function CloudPriceComparatorPage() {
         })
         .finally(() => setIsGooglePriceLoading(false));
     } else if (!isMetadataLoading) {
-      setGooglePriceData(null);
+      setGooglePriceData(null); // Clear price if inputs are not ready
     }
   }, [selectedGoogleRegion, selectedGoogleInstance, selectedGooglePricingModel, toast, isMetadataLoading]);
 
@@ -431,6 +431,7 @@ export default function CloudPriceComparatorPage() {
   const renderCpuDetails = (details: CpuDetails | null) => {
     const cpuDetailsWrapperClass = "mt-1 h-5 flex items-center text-xs text-muted-foreground";
     if (isMetadataLoading || !details || (!details.architecture && !details.clockSpeed)) {
+      // Render a placeholder that occupies the same space to prevent layout shifts
       return <div className={`${cpuDetailsWrapperClass} text-transparent`}><Cpu size={12} className="mr-1 opacity-0"/>&nbsp;</div>;
     }
     return (
@@ -445,6 +446,7 @@ export default function CloudPriceComparatorPage() {
   const renderSapsRating = (rating: number | null, isSapFilterActive: boolean) => {
     const sapsRatingWrapperClass = "mt-1 h-5 flex items-center text-xs text-muted-foreground";
     if (isMetadataLoading || !isSapFilterActive || rating === null || rating === undefined) {
+      // Render a placeholder that occupies the same space
       return <div className={`${sapsRatingWrapperClass} text-transparent`}>&nbsp;</div>;
     }
     return (
@@ -459,26 +461,27 @@ export default function CloudPriceComparatorPage() {
     providerName: CloudProvider,
     priceData: PriceData | null,
     isLoading: boolean,
-    googleBasePriceData: PriceData | null
+    googleBasePriceData: PriceData | null // Pass Google's price for comparison
   ) => {
-    const priceDisplayWrapperClass = "mt-2 pt-2 border-t border-dashed";
-    if (isLoading || isMetadataLoading) {
+    const priceDisplayWrapperClass = "mt-2 pt-2 border-t border-dashed"; // Added some top padding and border
+    if (isLoading || isMetadataLoading) { // Check global metadata loading too
       return <div className={`${priceDisplayWrapperClass} flex items-center`}><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading price...</div>;
     }
     if (!priceData || priceData.price === null) {
+      // Render a placeholder for consistent height when no price
       return <div className={`${priceDisplayWrapperClass} text-transparent`}>&nbsp;</div>;
     }
 
     const monthlyPrice = priceData.price * HOURS_IN_MONTH;
     let differenceText = '';
     let differencePercentageText = '';
-    let textColorClass = 'text-foreground';
+    let textColorClass = 'text-foreground'; // Default text color
 
     if (providerName !== 'Google Cloud' && googleBasePriceData?.price !== null && googleBasePriceData?.price !== undefined && priceData.price !== null) {
       const googleMonthlyPrice = googleBasePriceData.price * HOURS_IN_MONTH;
       const difference = monthlyPrice - googleMonthlyPrice;
 
-      if (googleMonthlyPrice !== 0) {
+      if (googleMonthlyPrice !== 0) { // Avoid division by zero
           const percentageDifference = (difference / googleMonthlyPrice) * 100;
           if (difference < 0) {
             differenceText = `-$${Math.abs(difference).toFixed(2)}`;
@@ -748,4 +751,3 @@ export default function CloudPriceComparatorPage() {
   );
 
 }
-
