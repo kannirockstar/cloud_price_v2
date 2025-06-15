@@ -34,7 +34,7 @@ export async function loadProviderMetadata(): Promise<void> {
         metadataFileNames.map(async (fileName) => {
           const response = await fetch(`https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`, { cache: 'no-store' });
           if (!response.ok) {
-            throw new Error(`Failed to fetch ${fileName} from GCS: ${response.status} ${response.statusText}`);
+            throw new Error(`Failed to fetch ${fileName} from GCS: ${response.status} ${response.statusText}. URL: ${response.url}`);
           }
           return response.json();
         })
@@ -48,17 +48,29 @@ export async function loadProviderMetadata(): Promise<void> {
       metadataLoaded = true;
       console.log("[Metadata] Provider metadata fetching from GCS complete.");
       console.log(`[Metadata] Loaded ${googleCloudRegions.length} GCP regions, ${azureRegions.length} Azure regions, ${awsRegions.length} AWS regions, ${machineFamilies.length} machine families.`);
-    } catch (error) {
-      console.error("[Metadata] Error fetching or processing metadata from GCS:", error);
-      // Keep arrays empty or use stale data if a more sophisticated caching/fallback is desired
+    } catch (error: any) {
+      console.error("[Metadata] Error fetching or processing metadata from GCS:", error.message);
+      if (error instanceof TypeError && error.message.toLowerCase().includes("failed to fetch")) {
+        console.error("[Metadata] 'Failed to fetch' can be due to several reasons:");
+        console.error("  1. Network connectivity issues from your browser/client.");
+        console.error(`  2. CORS (Cross-Origin Resource Sharing) policy on the GCS bucket '${GCS_BUCKET_NAME}'. Ensure your bucket is configured to allow GET requests from your application's origin (e.g., http://localhost:9002 or your deployed app domain).`);
+        console.error("     - To check CORS: `gsutil cors get gs://" + GCS_BUCKET_NAME + "`");
+        console.error("     - To set CORS (example for allowing all origins for GET): Create a cors-config.json `[{\"origin\": [\"*\"], \"method\": [\"GET\"], \"maxAgeSeconds\": 3600}]` and run `gsutil cors set cors-config.json gs://" + GCS_BUCKET_NAME + "`");
+        console.error("  3. Incorrect GCS bucket name or file paths. Verify the files exist at the constructed URLs, e.g.:");
+        metadataFileNames.forEach(fileName => {
+          console.error(`     - https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`);
+        });
+        console.error("  4. GCS object permissions. Ensure the metadata files are publicly readable when accessed via direct storage.googleapis.com URLs. This is different from Firebase Storage download URLs which use tokens.");
+        console.error("     - To make an object public (example): `gsutil acl ch -u AllUsers:R gs://" + GCS_BUCKET_NAME + "/metadata/googleCloudRegions.json`");
+        console.error("     - To make all objects in the metadata/ folder public: `gsutil iam ch allUsers:objectViewer gs://" + GCS_BUCKET_NAME + "/metadata/*` (Granting `objectViewer` at the folder level, or `legacyObjectReader` if using legacy bucket permissions. Be cautious with public access.)");
+      }
       googleCloudRegions = [];
       azureRegions = [];
       awsRegions = [];
       machineFamilies = [];
-      metadataLoaded = false; // Ensure it retries if needed
+      metadataLoaded = false;
+      metadataLoadingPromise = null; // Clear promise on error too
       throw error; // Re-throw to allow UI to handle loading failure
-    } finally {
-      metadataLoadingPromise = null; // Clear the promise after completion or failure
     }
   })();
   return metadataLoadingPromise;
@@ -335,7 +347,6 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
 const getInstanceFullDescription = (provider: CloudProvider, instanceId: string): string => {
   if (!metadataLoaded) {
       console.warn(`[Metadata] getInstanceFullDescription called before metadata loaded. Instance: ${instanceId}`);
-      // Potentially trigger loadProviderMetadata here or ensure it's called earlier
   }
   const mf = machineFamilies.find(m => m.id === instanceId && m.provider === provider);
   return mf ? mf.fullDescription : `${provider} Instance ${instanceId} (Details not found)`;
@@ -344,7 +355,6 @@ const getInstanceFullDescription = (provider: CloudProvider, instanceId: string)
 export const getRegionNameById = (provider: CloudProvider, regionId: string): string => {
   if (!metadataLoaded) {
       console.warn(`[Metadata] getRegionNameById called before metadata loaded. Region: ${regionId}`);
-      // Potentially trigger loadProviderMetadata here
   }
   let regions: Region[] = [];
   if (provider === 'Google Cloud') regions = googleCloudRegions;
@@ -370,7 +380,6 @@ export const fetchPricingData = async (
         await loadProviderMetadata(); // Ensure metadata is loaded before proceeding
     } catch (error) {
         console.error("[Pricing] Failed to load metadata in fetchPricingData. Pricing will be unavailable.", error);
-        // Fall through to return null price or throw specific error
     }
   }
 
@@ -380,7 +389,7 @@ export const fetchPricingData = async (
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
-  let responseText = ''; // To store raw response text for debugging
+  let responseText = ''; 
 
   let providerPathSegment = '';
   if (provider === 'Google Cloud') providerPathSegment = 'GCE';
@@ -404,30 +413,27 @@ export const fetchPricingData = async (
   console.log(`[Pricing] Attempting to fetch ${provider} pricing data from GCS: ${gcsDataUrl}`);
 
   try {
-    const response = await fetch(gcsDataUrl, { cache: 'no-store' }); // Prevent caching issues
-    responseText = await response.text(); // Get raw text for better debugging if JSON parse fails
+    const response = await fetch(gcsDataUrl, { cache: 'no-store' }); 
+    responseText = await response.text(); 
 
     if (!response.ok) {
       console.error(`[Pricing] HTTP error fetching ${provider} pricing from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
       console.error(`[Pricing] ${provider} GCS Error Response Body: ${responseText}`);
-      // price remains null, will be handled by the UI as "not available"
     } else {
-      const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = JSON.parse(responseText); // Explicitly type to expect hourlyPrice
+      const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = JSON.parse(responseText); 
       if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
         price = parseFloat(Math.max(0.000001, gcsDataObject.hourlyPrice).toFixed(6));
       } else {
         console.warn(`[Pricing] Hourly price not found or not a number in ${provider} GCS data for ${gcsDataUrl}. Received data:`, gcsDataObject);
-        // price remains null
       }
     }
-  } catch (error: any) { // Catch any error, including JSON parsing errors
+  } catch (error: any) { 
     console.error(`[Pricing] Catch block: Error during fetch or JSON parse for ${provider} ${instanceId} in ${regionId} (${pricingModelValue}) from GCS:`);
     console.error(`  URL: ${gcsDataUrl}`);
     console.error(`  Error Name: ${error.name}`);
     console.error(`  Error Message: ${error.message}`);
     if (error.stack) console.error('  Error stack:', error.stack);
     if (responseText) console.error(`  Raw text content (first 500 chars) that may have caused parsing error: ${responseText.substring(0, 500)}`);
-    // price remains null
   }
 
   console.log(`[Pricing] Result for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}, label: ${modelDetails.label}): Price = ${price}`);
