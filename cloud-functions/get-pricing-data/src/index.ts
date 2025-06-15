@@ -7,7 +7,7 @@ import cors from 'cors';
 const corsHandler = cors({ origin: true }); // Allows all origins, adjust for production
 
 const storage = new Storage();
-const bucketName = process.env.GCS_BUCKET_NAME;
+const configuredBucketName = process.env.GCS_BUCKET_NAME;
 
 /**
  * Parses GCE CSV content to find the hourly price for a specific instance and pricing model.
@@ -268,14 +268,16 @@ function parseGenericCsvForPrice(
 
 
 export const getPricingData: HttpFunction = async (req, res) => {
+  console.log(`[GCF/getPricingData] Function invoked. Configured GCS_BUCKET_NAME: ${configuredBucketName || 'NOT SET'}`);
+
   if (req.method === 'OPTIONS') {
     corsHandler(req, res, () => { res.status(204).send(''); });
     return;
   }
 
   corsHandler(req, res, async () => {
-    if (!bucketName) {
-      console.error('GCS_BUCKET_NAME environment variable not set.');
+    if (!configuredBucketName) {
+      console.error('CRITICAL: GCS_BUCKET_NAME environment variable not set in Cloud Function.');
       res.status(500).send({ error: 'Server configuration error: Bucket name not set.' });
       return;
     }
@@ -305,7 +307,7 @@ export const getPricingData: HttpFunction = async (req, res) => {
     const awsPriceColumn = 'hourly_price';
 
     try {
-      const file = storage.bucket(bucketName!).file(filePath); // Initialize file variable
+      const file = storage.bucket(configuredBucketName).file(filePath); // Initialize file variable
 
       if (provider === 'Google Cloud') {
         gcsFolder = 'GCE';
@@ -315,11 +317,11 @@ export const getPricingData: HttpFunction = async (req, res) => {
         // to match 'MachineFamily' column (e.g., 'e2-standard-2') in CSV.
         const gceMachineFamilyToLookup = instanceId.replace(/^gcp-/, ''); 
         
-        console.log(`[GCF/getPricingData] Attempting GCE CSV download: gs://${bucketName}/${filePath}`);
-        const gceFile = storage.bucket(bucketName!).file(filePath);
+        console.log(`[GCF/getPricingData] Attempting GCE CSV download: gs://${configuredBucketName}/${filePath}`);
+        const gceFile = storage.bucket(configuredBucketName).file(filePath);
         const [exists] = await gceFile.exists();
         if (!exists) {
-          console.warn(`[GCF/getPricingData] GCE CSV File not found: gs://${bucketName}/${filePath}`);
+          console.warn(`[GCF/getPricingData] GCE CSV File not found: gs://${configuredBucketName}/${filePath}`);
           res.status(404).send({ error: `Pricing data CSV not found. File: ${filePath}` });
           return;
         }
@@ -328,15 +330,15 @@ export const getPricingData: HttpFunction = async (req, res) => {
         foundPrice = parseGceCsvForPrice(contentString, gceMachineFamilyToLookup, pricingModelValue, filePath);
 
       } else if (provider === 'Azure') {
-        gcsFolder = 'Azure';
+        gcsFolder = 'Azure'; // Updated from 'azure_prices_python' to 'Azure' for consistency
         csvFileName = `${regionId}_prices.csv`; // e.g., Azure/eastus2_prices.csv
         filePath = `${gcsFolder}/${csvFileName}`;
 
-        console.log(`[GCF/getPricingData] Attempting Azure CSV download: gs://${bucketName}/${filePath}`);
-        const azureFile = storage.bucket(bucketName!).file(filePath);
+        console.log(`[GCF/getPricingData] Attempting Azure CSV download: gs://${configuredBucketName}/${filePath}`);
+        const azureFile = storage.bucket(configuredBucketName).file(filePath);
         const [exists] = await azureFile.exists();
         if (!exists) {
-          console.warn(`[GCF/getPricingData] Azure CSV File not found: gs://${bucketName}/${filePath}`);
+          console.warn(`[GCF/getPricingData] Azure CSV File not found: gs://${configuredBucketName}/${filePath}`);
           res.status(404).send({ error: `Pricing data CSV not found. File: ${filePath}` });
           return;
         }
@@ -350,11 +352,11 @@ export const getPricingData: HttpFunction = async (req, res) => {
         csvFileName = `ec2_pricing_${regionId}.csv`; // e.g., EC2/ec2_pricing_af-south-1.csv
         filePath = `${gcsFolder}/${csvFileName}`;
 
-        console.log(`[GCF/getPricingData] Attempting AWS CSV download: gs://${bucketName}/${filePath}`);
-        const awsFile = storage.bucket(bucketName!).file(filePath);
+        console.log(`[GCF/getPricingData] Attempting AWS CSV download: gs://${configuredBucketName}/${filePath}`);
+        const awsFile = storage.bucket(configuredBucketName).file(filePath);
         const [exists] = await awsFile.exists();
         if (!exists) {
-          console.warn(`[GCF/getPricingData] AWS CSV File not found: gs://${bucketName}/${filePath}`);
+          console.warn(`[GCF/getPricingData] AWS CSV File not found: gs://${configuredBucketName}/${filePath}`);
           res.status(404).send({ error: `Pricing data CSV not found. File: ${filePath}` });
           return;
         }
@@ -384,19 +386,19 @@ export const getPricingData: HttpFunction = async (req, res) => {
       }
 
     } catch (error: any) {
-      console.error(`[GCF/getPricingData] Error processing CSV file from GCS (gs://${bucketName}/${filePath}):`, error);
+      console.error(`[GCF/getPricingData] Error processing CSV file from GCS (gs://${configuredBucketName}/${filePath}):`, error);
       let errorMessage = 'Failed to process pricing data CSV from GCS.';
       let statusCode = 500;
 
       if (error.code === 403 || (error.errors && error.errors.some((e: any) => e.reason === 'forbidden'))) {
-          errorMessage = `Permission denied for GCF service account when accessing GCS bucket '${bucketName}' for file '${filePath}'. Ensure the GCF service account has 'Storage Object Viewer' role.`;
+          errorMessage = `Permission denied for GCF service account when accessing GCS bucket '${configuredBucketName}' for file '${filePath}'. Ensure the GCF service account has 'Storage Object Viewer' role.`;
           statusCode = 403;
       } else if (error.code === 404 || (error.message && error.message.toLowerCase().includes('no such object'))) {
-          errorMessage = `CSV File not found in GCS: gs://${bucketName}/${filePath}. Please ensure the file path and name are correct.`;
+          errorMessage = `CSV File not found in GCS: gs://${configuredBucketName}/${filePath}. Please ensure the file path and name are correct.`;
           statusCode = 404;
       } else if (error.message?.includes("CSV file is missing required columns") || error.message?.includes("has no data rows or is malformed")) {
           errorMessage = error.message; 
-          statusCode = 500;
+          statusCode = 500; // Or 400 if it's more like a bad request due to malformed CSV
       }
       res.status(statusCode).send({ error: errorMessage, details: error.message });
     }
