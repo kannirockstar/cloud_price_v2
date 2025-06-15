@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && functions-framework --target=getPricingData",
-    "deploy": "npm run build && gcloud functions deploy getPricingData --gen2 --runtime=nodejs20 --trigger-http --allow-unauthenticated --region=us-central1 --entry-point=getPricingData --source=. --set-env-vars GCS_BUCKET_NAME=price-comparison-cc262.appspot.com"
+    "deploy": "npm run build && gcloud functions deploy getPricingData --gen2 --runtime=nodejs20 --trigger-http --allow-unauthenticated --region=us-central1 --entry-point=getPricingData --source=. --set-env-vars GCS_BUCKET_NAME=firestore-cloud-comparator"
   },
   "dependencies": {
     "@google-cloud/functions-framework": "^3.3.0",
