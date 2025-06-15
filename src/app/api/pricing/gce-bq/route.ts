@@ -7,7 +7,7 @@ import type { PriceData, CloudProvider } from '@/lib/types'; // Assuming types a
 // You might want to use an environment variable for this in a real application
 const PROJECT_ID = 'YOUR_PROJECT_ID'; // REPLACE THIS
 const DATASET_ID = 'YOUR_DATASET_ID'; // REPLACE THIS
-const TABLE_ID = 'gce_pricing_table';   // REPLACE THIS if your table name is different
+const TABLE_ID = 'YOUR_GCE_PRICING_TABLE';   // REPLACE THIS if your table name is different
 
 const bigquery = new BigQuery({ projectId: PROJECT_ID });
 
@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
   }
 
   // IMPORTANT: Adjust the SQL query to match your actual table schema and column names
+  // This query assumes your table has 'hourly_price' and columns for filtering.
   const query = `
     SELECT 
       hourly_price AS price  -- Assuming 'hourly_price' is your price column
@@ -49,8 +50,10 @@ export async function GET(request: NextRequest) {
 
     let price: number | null = null;
     if (rows.length > 0 && rows[0].price !== null && typeof rows[0].price === 'number') {
+      // Ensure price is not extremely small or negative, and format to 6 decimal places
       price = parseFloat(Math.max(0.000001, rows[0].price).toFixed(6));
     } else if (rows.length > 0) {
+        // Log if a row was found but price was not a number or was null
         console.warn(`[GCE BQ API] Price found for ${instanceId} in ${regionId} (model: ${pricingModelValue}) but was not a number or was null:`, rows[0].price);
     }
 
