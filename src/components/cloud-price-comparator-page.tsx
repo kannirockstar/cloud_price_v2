@@ -23,7 +23,7 @@ import {
   getMachineInstancesForFamily,
   fetchPricingData,
   getPricingModelsForProvider,
-  loadProviderMetadata, // Import the new loading function
+  loadProviderMetadata,
 } from '@/lib/data';
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, CpuDetails } from '@/lib/types';
 
@@ -101,31 +101,44 @@ export default function CloudPriceComparatorPage() {
   // Load metadata from GCS on component mount
   useEffect(() => {
     const initMetadata = async () => {
+      console.log('CloudPriceComparatorPage: Starting initMetadata...');
       setIsMetadataLoading(true);
       try {
         await loadProviderMetadata();
-        // After metadata is loaded, populate initial geo options
-        setGoogleGeoOptions(getGeosForProvider('Google Cloud'));
-        setAzureGeoOptions(getGeosForProvider('Azure'));
-        setAwsGeoOptions(getGeosForProvider('AWS'));
+        console.log('CloudPriceComparatorPage: loadProviderMetadata finished.');
+
+        const gcpGeos = getGeosForProvider('Google Cloud');
+        console.log('CloudPriceComparatorPage: GCP Geos from getGeosForProvider:', gcpGeos);
+        setGoogleGeoOptions(gcpGeos);
+
+        const azGeos = getGeosForProvider('Azure');
+        console.log('CloudPriceComparatorPage: Azure Geos from getGeosForProvider:', azGeos);
+        setAzureGeoOptions(azGeos);
+
+        const awsGeos = getGeosForProvider('AWS');
+        console.log('CloudPriceComparatorPage: AWS Geos from getGeosForProvider:', awsGeos);
+        setAwsGeoOptions(awsGeos);
         
         setGooglePricingModelOptions(getPricingModelsForProvider('Google Cloud'));
         setAzurePricingModelOptions(getPricingModelsForProvider('Azure'));
         setAwsPricingModelOptions(getPricingModelsForProvider('AWS'));
 
+        console.log('CloudPriceComparatorPage: Geo and pricing model options set.');
+
       } catch (error) {
-        console.error("Failed to load provider metadata:", error);
+        console.error("CloudPriceComparatorPage: Failed to initialize metadata:", error);
         toast({
           variant: "destructive",
           title: "Metadata Error",
-          description: "Failed to load provider metadata from GCS. Dropdowns may be empty.",
+          description: "Failed to load provider metadata from GCS. Dropdowns may be empty or non-functional.",
         });
       } finally {
+        console.log('CloudPriceComparatorPage: Setting isMetadataLoading to false.');
         setIsMetadataLoading(false);
       }
     };
     initMetadata();
-  }, [toast]);
+  }, [toast]); // This useEffect runs once on mount
 
 
   // Initialize selected geos - dependent on metadata loading and geo options population
@@ -133,6 +146,7 @@ export default function CloudPriceComparatorPage() {
     if (!isMetadataLoading && googleGeoOptions.length > 0 && !selectedGoogleGeo) {
       const northAmericaOption = googleGeoOptions.find(o => o.value === 'North America');
       setSelectedGoogleGeo(northAmericaOption ? northAmericaOption.value : googleGeoOptions[0].value);
+      console.log('CloudPriceComparatorPage: Default Google Geo set to:', northAmericaOption ? northAmericaOption.value : googleGeoOptions[0].value);
     }
   }, [googleGeoOptions, selectedGoogleGeo, isMetadataLoading]);
 
@@ -140,6 +154,7 @@ export default function CloudPriceComparatorPage() {
     if (!isMetadataLoading && azureGeoOptions.length > 0 && !selectedAzureGeo) {
       const northAmericaOption = azureGeoOptions.find(o => o.value === 'North America');
       setSelectedAzureGeo(northAmericaOption ? northAmericaOption.value : azureGeoOptions[0].value);
+      console.log('CloudPriceComparatorPage: Default Azure Geo set to:', northAmericaOption ? northAmericaOption.value : azureGeoOptions[0].value);
     }
   }, [azureGeoOptions, selectedAzureGeo, isMetadataLoading]);
 
@@ -147,6 +162,7 @@ export default function CloudPriceComparatorPage() {
     if (!isMetadataLoading && awsGeoOptions.length > 0 && !selectedAwsGeo) {
       const northAmericaOption = awsGeoOptions.find(o => o.value === 'North America');
       setSelectedAwsGeo(northAmericaOption ? northAmericaOption.value : awsGeoOptions[0].value);
+      console.log('CloudPriceComparatorPage: Default AWS Geo set to:', northAmericaOption ? northAmericaOption.value : awsGeoOptions[0].value);
     }
   }, [awsGeoOptions, selectedAwsGeo, isMetadataLoading]);
 
@@ -271,7 +287,7 @@ export default function CloudPriceComparatorPage() {
       setGoogleInstanceOptions(instances);
       updateCpuDetails(instances, setGoogleCpuDetails);
       if (instances.length > 0) setSelectedGoogleInstance(instances[0].id); else setSelectedGoogleInstance('');
-    } else if (!isMetadataLoading) { // ensure options are cleared if family group is removed
+    } else if (!isMetadataLoading) { 
       setGoogleInstanceOptions([]);
       setSelectedGoogleInstance('');
       setGoogleCpuDetails(null);
@@ -732,3 +748,4 @@ export default function CloudPriceComparatorPage() {
   );
 
 }
+

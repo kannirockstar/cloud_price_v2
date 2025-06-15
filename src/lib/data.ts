@@ -10,47 +10,52 @@ export let awsRegions: Region[] = [];
 export let machineFamilies: MachineFamily[] = [];
 let metadataLoaded = false;
 
-async function fetchMetadataFile<T>(fileName: string): Promise<T | null> {
+async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   const url = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`;
   console.log(`Fetching metadata file: ${url}`);
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      console.error(`Failed to fetch metadata file ${fileName}: ${response.status} ${response.statusText}`);
+      console.error(`Failed to fetch metadata file ${fileName}: ${response.status} ${response.statusText} from ${url}`);
       return null;
     }
-    return await response.json() as T;
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+        console.error(`Metadata file ${fileName} from ${url} did not return an array. Data received:`, data);
+        return null;
+    }
+    return data as T[];
   } catch (error) {
-    console.error(`Error fetching or parsing metadata file ${fileName}:`, error);
+    console.error(`Error fetching or parsing metadata file ${fileName} from ${url}:`, error);
     return null;
   }
 }
 
 export async function loadProviderMetadata(): Promise<void> {
   if (metadataLoaded) {
-    console.log("Metadata already loaded.");
+    console.log("Metadata already loaded. Skipping re-fetch.");
     return;
   }
   console.log("Loading provider metadata from GCS...");
   
   const [gcpRegionsData, azRegionsData, awsRegionsData, mfData] = await Promise.all([
-    fetchMetadataFile<Region[]>('googleCloudRegions.json'),
-    fetchMetadataFile<Region[]>('azureRegions.json'),
-    fetchMetadataFile<Region[]>('awsRegions.json'),
-    fetchMetadataFile<MachineFamily[]>('machineFamilies.json')
+    fetchMetadataFile<Region>('googleCloudRegions.json'),
+    fetchMetadataFile<Region>('azureRegions.json'),
+    fetchMetadataFile<Region>('awsRegions.json'),
+    fetchMetadataFile<MachineFamily>('machineFamilies.json')
   ]);
 
-  if (gcpRegionsData) googleCloudRegions = gcpRegionsData;
-  if (azRegionsData) azureRegions = azRegionsData;
-  if (awsRegionsData) awsRegions = awsRegionsData;
-  if (mfData) machineFamilies = mfData;
+  googleCloudRegions = gcpRegionsData || [];
+  azureRegions = azRegionsData || [];
+  awsRegions = awsRegionsData || [];
+  machineFamilies = mfData || [];
   
   metadataLoaded = true;
-  console.log("Provider metadata loading complete.");
-  console.log("Loaded Google Cloud Regions:", googleCloudRegions.length);
-  console.log("Loaded Azure Regions:", azureRegions.length);
-  console.log("Loaded AWS Regions:", awsRegions.length);
-  console.log("Loaded Machine Families (all providers):", machineFamilies.length);
+  console.log("Provider metadata loading complete from GCS.");
+  console.log("GCP Regions in data.ts (length):", googleCloudRegions.length, googleCloudRegions.length > 0 ? googleCloudRegions[0] : '(empty)');
+  console.log("Azure Regions in data.ts (length):", azureRegions.length, azureRegions.length > 0 ? azureRegions[0] : '(empty)');
+  console.log("AWS Regions in data.ts (length):", awsRegions.length, awsRegions.length > 0 ? awsRegions[0] : '(empty)');
+  console.log("Machine Families in data.ts (length):", machineFamilies.length, machineFamilies.length > 0 ? machineFamilies[0] : '(empty)');
 }
 
 
@@ -60,11 +65,15 @@ export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   else if (provider === 'Azure') regions = azureRegions;
   else if (provider === 'AWS') regions = awsRegions;
 
+  console.log(`getGeosForProvider for ${provider}: source regions array length = ${regions.length}`);
+  if (regions.length > 0) {
+    console.log(`First region for ${provider} in getGeosForProvider:`, regions[0]);
+  }
+
   if (regions.length === 0 && metadataLoaded) {
-    // If metadata is loaded but still no regions, it's an issue with the GCS files or data.
-    console.warn(`Metadata loaded, but no regions found for provider ${provider}. Check GCS metadata files.`);
+    console.warn(`Metadata loaded, but no regions found for provider ${provider} in getGeosForProvider. This means either the GCS file was empty/malformed or the module array wasn't populated correctly.`);
   } else if (regions.length === 0 && !metadataLoaded) {
-     console.warn(`Metadata not yet loaded. Regions for ${provider} will be empty initially.`);
+     console.warn(`Metadata not yet loaded when getGeosForProvider for ${provider} was called. This is expected during initial render. Regions for ${provider} will be empty initially.`);
   }
 
   const geos = Array.from(new Set(regions.map(r => r.geo)));
@@ -78,9 +87,9 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   else if (provider === 'AWS') allRegions = awsRegions;
 
    if (allRegions.length === 0 && metadataLoaded) {
-    console.warn(`Metadata loaded, but no regions available for provider ${provider}. Check GCS metadata files.`);
+    console.warn(`Metadata loaded, but no regions available for provider ${provider} in getRegionsForProvider. Check GCS metadata files or population of module arrays.`);
   } else if (allRegions.length === 0 && !metadataLoaded) {
-     console.warn(`Metadata not yet loaded. Region list for ${provider} will be empty initially.`);
+     console.warn(`Metadata not yet loaded when getRegionsForProvider for ${provider} was called. Region list for ${provider} will be empty initially.`);
   }
 
 
@@ -94,7 +103,7 @@ export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | 
   let cpuCount: number | null = null;
   if (machine.cpu) {
     if (machine.cpu.toLowerCase().includes('shared')) {
-      cpuCount = 0.5;
+      cpuCount = 0.5; // Represent shared CPU as 0.5 for filtering purposes
     } else {
       const cpuMatch = machine.cpu.match(/(\d+)/);
       if (cpuMatch && cpuMatch[1]) {
@@ -127,10 +136,10 @@ export const getMachineFamilyGroups = (
   applyTolerance?: boolean
 ): SelectOption[] => {
   if (machineFamilies.length === 0 && metadataLoaded) {
-    console.warn(`Metadata loaded, but machineFamilies is empty. Filtering for provider ${provider} will yield no results.`);
+    console.warn(`Metadata loaded, but machineFamilies is empty in getMachineFamilyGroups. Filtering for provider ${provider} will yield no results.`);
     return [];
   } else if (machineFamilies.length === 0 && !metadataLoaded) {
-    console.warn(`Metadata not yet loaded. Machine family groups for ${provider} will be empty initially.`);
+    console.warn(`Metadata not yet loaded when getMachineFamilyGroups for ${provider} was called. Machine family groups for ${provider} will be empty initially.`);
     return [];
   }
   
@@ -153,8 +162,7 @@ export const getMachineFamilyGroups = (
           cpuMatch = specs.cpuCount >= minCpu;
         }
       } else if (minCpu !== undefined && specs.cpuCount === null) {
-        // If minCpu is specified but instance has no CPU info, it doesn't match unless minCpu is 0 or less
-        cpuMatch = minCpu <= 0;
+        cpuMatch = minCpu <= 0; // If minCPU is 0 or less, allow null CPU info
       }
 
       let ramMatch = true;
@@ -167,8 +175,7 @@ export const getMachineFamilyGroups = (
           ramMatch = specs.ramInGB >= userMinRamGB;
         }
       } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
-        // If userMinRamGB is specified but instance has no RAM info, it doesn't match unless userMinRamGB is 0 or less
-        ramMatch = userMinRamGB <= 0;
+        ramMatch = userMinRamGB <= 0; // If minRAM is 0 or less, allow null RAM info
       }
       return cpuMatch && ramMatch;
     });
@@ -187,10 +194,10 @@ export const getMachineInstancesForFamily = (
   applyTolerance?: boolean
 ): MachineFamily[] => {
    if (machineFamilies.length === 0 && metadataLoaded) {
-    console.warn(`Metadata loaded, but machineFamilies is empty. Instances for provider ${provider} and familyGroup ${familyGroup} will be empty.`);
+    console.warn(`Metadata loaded, but machineFamilies is empty in getMachineInstancesForFamily. Instances for provider ${provider} and familyGroup ${familyGroup} will be empty.`);
     return [];
   } else if (machineFamilies.length === 0 && !metadataLoaded) {
-    console.warn(`Metadata not yet loaded. Instances for ${provider} / ${familyGroup} will be empty initially.`);
+    console.warn(`Metadata not yet loaded when getMachineInstancesForFamily for ${provider} / ${familyGroup} was called. Instances will be empty initially.`);
     return [];
   }
 
@@ -261,6 +268,7 @@ export const getMachineInstancesForFamily = (
     });
 };
 
+// PricingModelOptions remains hardcoded as it's less dynamic and simpler for now.
 export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
   { value: 'gcp-1yr-cud', label: '1-Year CUD', providers: ['Google Cloud'], discountFactor: 0.70 },
@@ -369,7 +377,7 @@ export const fetchPricingData = async (
   try {
     const response = await fetch(gcsDataUrl);
     if (!response.ok) {
-      console.error(`Failed to fetch from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
+      console.error(`Failed to fetch pricing data from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
       return {
         provider,
         machineFamilyId: instanceId,
@@ -385,10 +393,10 @@ export const fetchPricingData = async (
 
     let finalPrice = null;
     if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
-      finalPrice = gcsDataObject.hourlyPrice * modelDetails.discountFactor;
+      finalPrice = gcsDataObject.hourlyPrice * modelDetails.discountFactor; // Applying discount factor here
       finalPrice = parseFloat(Math.max(0.000001, finalPrice).toFixed(6))
     } else {
-      console.warn(`Hourly price not found or not a number in GCS data for ${gcsDataUrl}`);
+      console.warn(`Hourly price not found or not a number in GCS data for ${gcsDataUrl}. Received data:`, gcsDataObject);
     }
 
     return {
@@ -403,7 +411,7 @@ export const fetchPricingData = async (
     };
 
   } catch (error) {
-    console.error(`Error during fetch or parsing for ${gcsDataUrl}:`, error);
+    console.error(`Error during fetch or parsing for pricing data from ${gcsDataUrl}:`, error);
     return {
       provider,
       machineFamilyId: instanceId,
