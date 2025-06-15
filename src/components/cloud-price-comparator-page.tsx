@@ -125,22 +125,32 @@ export default function CloudPriceComparatorPage() {
 
     } catch (error: any) {
       console.error("[CloudPriceComparatorPage] CRITICAL: Failed to initialize metadata in component:", error);
+      let toastTitle = "Metadata Initialization Error";
       let toastDescription = "Could not load essential configuration data. Dropdowns may be empty or non-functional. Please check browser console for detailed error messages from 'src/lib/data.ts' and verify Firebase setup.";
-      if (error && error.message && error.message.includes("NETWORK ERROR or issue with download URL")) {
-        toastDescription = "Network Error: Could not fetch metadata. Please check your internet connection, firewall/VPN settings, and browser extensions. Then, refresh the page. See console for more details.";
-      } else if (error && error.message && error.message.includes("FILE NOT FOUND")) {
-        toastDescription = "Configuration Error: A required metadata file was not found in Firebase Storage. Please ensure all metadata files are correctly uploaded. See console for details.";
-      } else if (error && error.message && error.message.includes("UNAUTHORIZED")) {
-        toastDescription = "Access Denied: Could not access metadata files in Firebase Storage. Please check your Firebase Storage rules to ensure public read access is allowed. See console for details.";
-      } else if (error && error.message && error.message.includes("MALFORMED JSON")) {
-        toastDescription = "Data Error: A metadata file contains invalid JSON. Please check the format of the files in Firebase Storage. See console for details.";
+      
+      if (error && error.message) {
+        if (error.message.includes("NETWORK ERROR or issue with download URL") || error.message.toLowerCase().includes("failed to fetch")) {
+          toastTitle = "Network Error Fetching Metadata";
+          toastDescription = `Failed to download essential configuration files. This is usually due to a client-side network issue. Please check:
+1. Your internet connection.
+2. Any firewall, VPN, or proxy settings.
+3. Browser extensions (try disabling ad-blockers or privacy tools).
+4. DNS resolution for 'firebasestorage.googleapis.com'.
+5. For more details, open your browser's developer console (F12 -> Console). The console contains specific error messages about which file failed and why.`;
+        } else if (error.message.includes("FILE NOT FOUND")) {
+          toastDescription = "Configuration Error: A required metadata file was not found in Firebase Storage. Please ensure all metadata files are correctly uploaded. See console for details.";
+        } else if (error.message.includes("UNAUTHORIZED")) {
+          toastDescription = "Access Denied: Could not access metadata files in Firebase Storage. Please check your Firebase Storage rules to ensure public read access is allowed. See console for details.";
+        } else if (error.message.includes("MALFORMED JSON")) {
+          toastDescription = "Data Error: A metadata file contains invalid JSON. Please check the format of the files in Firebase Storage. See console for details.";
+        }
       }
 
       toast({
         variant: "destructive",
-        title: "Metadata Initialization Error",
+        title: toastTitle,
         description: toastDescription,
-        duration: 10000,
+        duration: 15000, // Increased duration for more detailed message
       });
     } finally {
       console.log('[CloudPriceComparatorPage] Setting isMetadataLoading to false in finally block.');
