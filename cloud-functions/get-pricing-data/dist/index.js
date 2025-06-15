@@ -139,13 +139,16 @@ function parseAzureCsvForPrice(csvContent, targetInstanceId, targetPricingModel,
             // console.warn(`[GCF/parseAzureCsvForPrice] Skipping short row ${i+1} in ${filePath}. Values: ${rowValues.join(',')}`);
             continue;
         }
-        const csvInstanceId = rowValues[instanceNameColIndex]?.trim();
+        const csvInstanceIdStr = rowValues[instanceNameColIndex];
+        const csvInstanceId = typeof csvInstanceIdStr === 'string' ? csvInstanceIdStr.trim() : '';
         if (csvInstanceId !== targetInstanceId) {
             continue; // Not the instance we're looking for
         }
-        const csvReservationTerm = rowValues[reservationTermColIndex]?.trim().toLowerCase();
-        const csvMeterName = rowValues[meterNameColIndex]?.trim().toLowerCase();
-        const csvPriceStr = rowValues[priceColIndex]?.trim();
+        const csvReservationTermStr = rowValues[reservationTermColIndex];
+        const csvReservationTerm = typeof csvReservationTermStr === 'string' ? csvReservationTermStr.trim().toLowerCase() : '';
+        const csvMeterNameStr = rowValues[meterNameColIndex];
+        const csvMeterName = typeof csvMeterNameStr === 'string' ? csvMeterNameStr.trim().toLowerCase() : '';
+        const csvPriceStr = rowValues[priceColIndex]; // parseFloat handles trim and undefined
         const price = parseFloat(csvPriceStr);
         if (isNaN(price)) {
             // console.warn(`[GCF/parseAzureCsvForPrice] Invalid price '${csvPriceStr}' for instance ${csvInstanceId} in ${filePath}.`);
@@ -213,11 +216,14 @@ filePath // For logging
             // console.warn(`[GCF/parseGenericCsvForPrice] Skipping short row ${i+1} in ${filePath}. Values: ${rowValues.join(',')}`);
             continue;
         }
-        const csvInstanceId = rowValues[instanceNameColIndex]?.trim();
-        const csvPricingModel = rowValues[pricingModelColIndex]?.trim().toLowerCase();
-        const csvHourlyPriceStr = rowValues[hourlyPriceColIndex]?.trim();
+        const csvInstanceIdStr = rowValues[instanceNameColIndex];
+        const csvPricingModelStr = rowValues[pricingModelColIndex];
+        const csvHourlyPriceStr = rowValues[hourlyPriceColIndex];
+        // More robust handling of potentially undefined cell values
+        const csvInstanceId = typeof csvInstanceIdStr === 'string' ? csvInstanceIdStr.trim() : '';
+        const csvPricingModel = typeof csvPricingModelStr === 'string' ? csvPricingModelStr.trim().toLowerCase() : '';
         if (csvInstanceId === targetInstanceId && csvPricingModel === normalizedTargetPricingModel) {
-            const price = parseFloat(csvHourlyPriceStr);
+            const price = parseFloat(csvHourlyPriceStr); // parseFloat handles undefined/empty strings by returning NaN
             if (!isNaN(price)) {
                 console.log(`[GCF/parseGenericCsvForPrice] Successfully found price in generic CSV ${filePath} for ${targetInstanceId} (${targetPricingModel}): ${price}`);
                 return price;
@@ -282,8 +288,8 @@ const getPricingData = async (req, res) => {
                 foundPrice = parseGceCsvForPrice(contentString, gceMachineFamilyToLookup, pricingModelValue, filePath);
             }
             else if (provider === 'Azure') {
-                gcsFolder = 'Azure'; // Updated from 'azure_prices_python' to 'Azure' for consistency
-                csvFileName = `${regionId}_prices.csv`; // e.g., Azure/eastus2_prices.csv
+                gcsFolder = 'Azure';
+                csvFileName = `${regionId}_prices.csv`;
                 filePath = `${gcsFolder}/${csvFileName}`;
                 console.log(`[GCF/getPricingData] Attempting Azure CSV download: gs://${configuredBucketName}/${filePath}`);
                 const azureFile = storage.bucket(configuredBucketName).file(filePath);
@@ -295,12 +301,11 @@ const getPricingData = async (req, res) => {
                 }
                 const [contentBuffer] = await azureFile.download();
                 const contentString = contentBuffer.toString();
-                // The instanceId from frontend for Azure (e.g., 'Standard_D2s_v3') is used directly.
                 foundPrice = parseAzureCsvForPrice(contentString, instanceId, pricingModelValue, filePath);
             }
             else if (provider === 'AWS') {
                 gcsFolder = 'EC2';
-                csvFileName = `ec2_pricing_${regionId}.csv`; // e.g., EC2/ec2_pricing_af-south-1.csv
+                csvFileName = `ec2_pricing_${regionId}.csv`;
                 filePath = `${gcsFolder}/${csvFileName}`;
                 console.log(`[GCF/getPricingData] Attempting AWS CSV download: gs://${configuredBucketName}/${filePath}`);
                 const awsFile = storage.bucket(configuredBucketName).file(filePath);
@@ -312,7 +317,6 @@ const getPricingData = async (req, res) => {
                 }
                 const [contentBuffer] = await awsFile.download();
                 const contentString = contentBuffer.toString();
-                // The instanceId from frontend for AWS (e.g., 'm5.large') is used directly.
                 foundPrice = parseGenericCsvForPrice(contentString, instanceId, pricingModelValue, awsInstanceColumn, awsModelColumn, awsPriceColumn, filePath);
             }
             else {
@@ -338,8 +342,8 @@ const getPricingData = async (req, res) => {
             }
         }
         catch (error) {
-            console.error(`[GCF/getPricingData] Error processing CSV file from GCS (gs://${configuredBucketName}/${filePath}):`, error);
-            let errorMessage = 'Failed to process pricing data CSV from GCS.';
+            console.error(`[GCF/getPricingData] CRITICAL - Unhandled error processing CSV (gs://${configuredBucketName}/${filePath}):`, error);
+            let errorMessage = 'Failed to process pricing data CSV from GCS. Check GCF logs for specific error details.';
             let statusCode = 500;
             if (error.code === 403 || (error.errors && error.errors.some((e) => e.reason === 'forbidden'))) {
                 errorMessage = `Permission denied for GCF service account when accessing GCS bucket '${configuredBucketName}' for file '${filePath}'. Ensure the GCF service account has 'Storage Object Viewer' role.`;
@@ -351,7 +355,7 @@ const getPricingData = async (req, res) => {
             }
             else if (error.message?.includes("CSV file is missing required columns") || error.message?.includes("has no data rows or is malformed")) {
                 errorMessage = error.message;
-                statusCode = 500; // Or 400 if it's more like a bad request due to malformed CSV
+                statusCode = 500;
             }
             res.status(statusCode).send({ error: errorMessage, details: error.message });
         }
