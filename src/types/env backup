@@ -1,0 +1,16 @@
+
+# General BigQuery Configuration (used by GCE BQ API route)
+BIGQUERY_PROJECT_ID=manifest-setup-342214
+BIGQUERY_DATASET_ID=cloudprice
+
+# GCE Specific BigQuery Table
+BIGQUERY_GCE_TABLE_ID=GCE
+
+# Azure Specific BigQuery Table (for future use if Azure data moves to BQ)
+BIGQUERY_AZURE_TABLE_ID=AZURE
+
+# EC2/AWS Specific BigQuery Table (for future use if EC2 data moves to BQ)
+BIGQUERY_EC2_TABLE_ID=EC2
+
+# For local development with service account keys, uncomment and set:
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account-key.json

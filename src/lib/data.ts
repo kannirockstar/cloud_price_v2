@@ -12,7 +12,7 @@ export let awsRegions: Region[] = [];
 export let machineFamilies: MachineFamily[] = [];
 let metadataLoaded = false;
 
-const GCS_BUCKET_NAME = 'firestore-cloud-comparator';
+const GCS_BUCKET_NAME = 'firestore-cloud-comparator'; // Used for Azure and AWS pricing files
 
 export function loadProviderMetadata(): void {
   if (metadataLoaded) {
@@ -28,6 +28,7 @@ export function loadProviderMetadata(): void {
 
     metadataLoaded = true;
     console.log("[Metadata] Provider metadata loading from local files complete.");
+    console.log(`[Metadata] Loaded ${googleCloudRegions.length} GCP regions, ${azureRegions.length} Azure regions, ${awsRegions.length} AWS regions, ${machineFamilies.length} machine families.`);
   } catch (error) {
     console.error("[Metadata] Error processing local metadata JSON files:", error);
     googleCloudRegions = [];
@@ -38,6 +39,7 @@ export function loadProviderMetadata(): void {
   }
 }
 
+// Initialize metadata when this module is loaded
 loadProviderMetadata();
 
 export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
@@ -49,6 +51,11 @@ export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   if (provider === 'Google Cloud') regions = googleCloudRegions;
   else if (provider === 'Azure') regions = azureRegions;
   else if (provider === 'AWS') regions = awsRegions;
+
+  if (!regions || regions.length === 0) {
+    console.warn(`[Metadata] No regions found for provider ${provider} in getGeosForProvider. This might indicate a metadata loading issue.`);
+    return [];
+  }
   const geos = Array.from(new Set(regions.map(r => r.geo)));
   return geos.map(geo => ({ value: geo, label: geo })).sort((a, b) => a.label.localeCompare(b.label));
 };
@@ -63,17 +70,22 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   else if (provider === 'Azure') allRegions = azureRegions;
   else if (provider === 'AWS') allRegions = awsRegions;
 
-  if (geo) {
-    return allRegions.filter(region => region.geo === geo);
+  if (!allRegions || allRegions.length === 0) {
+    console.warn(`[Metadata] No regions found for provider ${provider} in getRegionsForProvider (geo: ${geo}).`);
+    return [];
   }
-  return allRegions;
+
+  if (geo) {
+    return allRegions.filter(region => region.geo === geo).sort((a,b) => a.name.localeCompare(b.name));
+  }
+  return allRegions.sort((a,b) => a.name.localeCompare(b.name));
 };
 
 export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | null, ramInGB: number | null } => {
   let cpuCount: number | null = null;
   if (machine.cpu) {
     if (machine.cpu.toLowerCase().includes('shared')) {
-      cpuCount = 0.5;
+      cpuCount = 0.5; // Or handle as a special case/string if preferred
     } else {
       const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/);
       if (cpuMatch && cpuMatch[1]) {
@@ -102,6 +114,11 @@ export const getMachineFamilyGroups = (
      console.warn("[Metadata] getMachineFamilyGroups called before metadata was successfully loaded. Attempting to load again.");
     loadProviderMetadata();
   }
+  if (!machineFamilies || machineFamilies.length === 0) {
+    console.warn(`[Metadata] No machine families loaded for provider ${provider} in getMachineFamilyGroups.`);
+    return [];
+  }
+
   let filteredMachines = machineFamilies.filter(mf => mf.provider === provider);
 
   if (filterSapCertified) {
@@ -114,11 +131,13 @@ export const getMachineFamilyGroups = (
       let cpuMatch = true;
       if (minCpu !== undefined && specs.cpuCount !== null) {
         const lowerBoundCpu = filterSapCertified && applyTolerance ? minCpu * 0.85 : minCpu;
-        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
+        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity; // No upper bound if not tolerating
         cpuMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
       } else if (minCpu !== undefined && specs.cpuCount === null) {
+         // If filtering by CPU but instance has no CPU spec (e.g. "Shared"), it fails unless minCpu is 0 or less
          cpuMatch = minCpu <= 0;
       }
+
       let ramMatch = true;
       if (userMinRamGB !== undefined && specs.ramInGB !== null) {
         const lowerBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 0.85 : userMinRamGB;
@@ -143,10 +162,16 @@ export const getMachineInstancesForFamily = (
     console.warn("[Metadata] getMachineInstancesForFamily called before metadata was successfully loaded. Attempting to load again.");
     loadProviderMetadata();
   }
+   if (!machineFamilies || machineFamilies.length === 0) {
+    console.warn(`[Metadata] No machine families loaded for provider ${provider} in getMachineInstancesForFamily.`);
+    return [];
+  }
+
   return machineFamilies.filter(mf => {
     const providerMatch = mf.provider === provider;
     const familyGroupMatch = mf.familyGroup === familyGroup;
     const sapMatch = filterSapCertified ? mf.isSapCertified === true : true;
+
     const specs = parseMachineSpecs(mf);
     let cpuFilterMatch = true;
     if (minCpu !== undefined && specs.cpuCount !== null) {
@@ -154,8 +179,9 @@ export const getMachineInstancesForFamily = (
        const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
        cpuFilterMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
     } else if (minCpu !== undefined && specs.cpuCount === null) {
-       cpuFilterMatch = minCpu <= 0;
+       cpuFilterMatch = minCpu <= 0; // Only matches if minCpu allows for non-specific CPU (e.g. 0 or less)
     }
+
     let ramFilterMatch = true;
     if (userMinRamGB !== undefined && specs.ramInGB !== null) {
        const lowerBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 0.85 : userMinRamGB;
@@ -164,6 +190,7 @@ export const getMachineInstancesForFamily = (
     } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
         ramFilterMatch = userMinRamGB <= 0;
     }
+
     return providerMatch && familyGroupMatch && sapMatch && cpuFilterMatch && ramFilterMatch;
   }).sort((a,b) => {
         const extractSortKey = (name: string) => {
@@ -173,23 +200,30 @@ export const getMachineInstancesForFamily = (
           });
           return parts;
         };
+
         const aParts = extractSortKey(a.instanceName);
         const bParts = extractSortKey(b.instanceName);
+
         for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
           const aPart = aParts[i];
           const bPart = bParts[i];
+
           if (typeof aPart === 'number' && typeof bPart === 'number') {
             if (aPart !== bPart) return aPart - bPart;
           } else if (typeof aPart === 'string' && typeof bPart === 'string') {
-            const sizeOrder = ['nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge', '4xlarge', '8xlarge', '12xlarge', '16xlarge', '24xlarge', '32xlarge', '48xlarge', '64xlarge', '96xlarge', 'metal'];
+            // Define a more comprehensive size order
+            const sizeOrder = ['nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge', '3xlarge', '4xlarge', '6xlarge', '8xlarge', '9xlarge', '10xlarge', '12xlarge', '16xlarge', '18xlarge', '20xlarge', '22xlarge', '24xlarge', '30xlarge', '32xlarge', '40xlarge', '44xlarge', '48xlarge', '56xlarge', '60xlarge', '64xlarge', '72xlarge', '80xlarge', '88xlarge', '96xlarge', '104xlarge', '112xlarge', '128xlarge', '160xlarge', '176xlarge', '180xlarge', '192xlarge', '208xlarge', '224xlarge', '360xlarge', '416xlarge', 'metal'];
             const aSizeIndex = sizeOrder.findIndex(s => aPart.includes(s));
             const bSizeIndex = sizeOrder.findIndex(s => bPart.includes(s));
+
             if (aSizeIndex !== -1 && bSizeIndex !== -1 && aSizeIndex !== bSizeIndex) {
               return aSizeIndex - bSizeIndex;
             }
+            // Fallback to localeCompare if not in custom size order or if same size category
             const comparison = aPart.localeCompare(bPart);
             if (comparison !== 0) return comparison;
           } else {
+            // Handle mixed types (e.g., number vs string) consistently
             return typeof aPart === 'number' ? -1 : 1;
           }
         }
@@ -199,16 +233,20 @@ export const getMachineInstancesForFamily = (
 
 export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
+  // Google Cloud
   { value: 'gcp-1yr-cud', label: '1-Year CUD', providers: ['Google Cloud'], discountFactor: 0.70 },
   { value: 'gcp-3yr-cud', label: '3-Year CUD', providers: ['Google Cloud'], discountFactor: 0.50 },
   { value: 'gcp-1yr-flex-cud', label: 'Flexible CUD (1-Year)', providers: ['Google Cloud'], discountFactor: 0.80 },
   { value: 'gcp-3yr-flex-cud', label: 'Flexible CUD (3-Year)', providers: ['Google Cloud'], discountFactor: 0.60 },
+  // Azure (RIs and SPs)
   { value: 'azure-1yr-ri-no-upfront', label: '1-Year RI (No Upfront)', providers: ['Azure'], discountFactor: 0.72 },
   { value: 'azure-3yr-ri-no-upfront', label: '3-Year RI (No Upfront)', providers: ['Azure'], discountFactor: 0.53 },
   { value: 'azure-1yr-ri-all-upfront', label: '1-Year RI (All Upfront)', providers: ['Azure'], discountFactor: 0.65 },
   { value: 'azure-3yr-ri-all-upfront', label: '3-Year RI (All Upfront)', providers: ['Azure'], discountFactor: 0.45 },
   { value: 'azure-1yr-sp', label: 'Savings Plan (1-Year)', providers: ['Azure'], discountFactor: 0.70 },
   { value: 'azure-3yr-sp', label: 'Savings Plan (3-Year)', providers: ['Azure'], discountFactor: 0.50 },
+
+  // AWS - Adding distinct EC2 Instance SP and Compute SP
   { value: 'aws-1yr-ec2instance-sp-no-upfront', label: 'EC2 Instance SP (1-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.75 },
   { value: 'aws-3yr-ec2instance-sp-no-upfront', label: 'EC2 Instance SP (3-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.55 },
   { value: 'aws-1yr-ec2instance-sp-partial-upfront', label: 'EC2 Instance SP (1-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.72 },
@@ -230,34 +268,41 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
     .sort((a, b) => {
         if (a.value === 'on-demand') return -1;
         if (b.value === 'on-demand') return 1;
+
         const getPriority = (label: string, value: string) => {
           if (provider === 'AWS') {
               if (value.includes('ec2instance-sp')) return 1;
               if (value.includes('compute-sp')) return 2;
-              return 5;
+              return 5; // Other/fallback for AWS
           }
-          if (label.includes('RI')) return 1;
-          if (label.includes('Savings Plan')) return 2;
-          if (label.includes('Flexible CUD')) return 4;
-          if (label.includes('CUD')) return 3;
-          return 5;
+          // Priorities for GCP and Azure
+          if (label.includes('RI')) return 1; // Azure RIs
+          if (label.includes('Savings Plan')) return 2; // Azure SPs
+          if (label.includes('Flexible CUD')) return 4; // GCP Flex CUDs
+          if (label.includes('CUD')) return 3; // GCP CUDs
+          return 5; // Fallback for GCP/Azure
         };
+
         const priorityA = getPriority(a.label, a.value);
         const priorityB = getPriority(b.label, b.value);
+
         if (priorityA !== priorityB) return priorityA - priorityB;
+
         const getYear = (val: string) => (val.includes('1yr') ? 1 : (val.includes('3yr') ? 3 : 0));
         const yearA = getYear(a.value);
         const yearB = getYear(b.value);
         if (yearA !== yearB) return yearA - yearB;
+
         const getUpfrontOrder = (val: string) => {
             if (val.includes('noupfront')) return 1;
             if (val.includes('partialupfront')) return 2;
             if (val.includes('allupfront')) return 3;
-            return 0;
+            return 0; // Default if no upfront specified
         };
         const upfrontA = getUpfrontOrder(a.value);
         const upfrontB = getUpfrontOrder(b.value);
         if (upfrontA !== upfrontB) return upfrontA - upfrontB;
+
         return a.label.localeCompare(b.label);
       });
 };
@@ -295,31 +340,34 @@ export const fetchPricingData = async (
 
   const modelDetails = getPricingModelDetails(pricingModelValue) ||
                      pricingModelOptions.find(m => m.value === 'on-demand') ||
-                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
+                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; // Fallback
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
-  let responseText = '';
+  let responseText = ''; // To capture response text for debugging
 
   try {
     if (provider === 'Google Cloud') {
       const apiUrl = `/api/pricing/gce-bq?regionId=${encodeURIComponent(regionId)}&instanceId=${encodeURIComponent(instanceId)}&pricingModelValue=${encodeURIComponent(pricingModelValue)}`;
       console.log(`[Pricing] Attempting to fetch GCE pricing data from API: ${apiUrl}`);
-      const response = await fetch(apiUrl, { cache: 'no-store' });
-      responseText = await response.text();
+      const response = await fetch(apiUrl, { cache: 'no-store' }); // Disable cache for fresh data
+      responseText = await response.text(); // Read text for logging before parsing
 
       if (!response.ok) {
         console.error(`[Pricing] HTTP error fetching GCE pricing from API (${apiUrl}): ${response.status} ${response.statusText}`);
         console.error(`[Pricing] GCE API Error Response Body: ${responseText}`);
+        // price remains null
       } else {
-        const data: Partial<PriceData> = JSON.parse(responseText);
-        if (data.price !== undefined) {
+        const data: Partial<PriceData> = JSON.parse(responseText); // Parse after logging
+        if (data.price !== undefined && data.price !== null) {
           price = data.price;
         } else {
-          console.warn(`[Pricing] Price not found in GCE API response for ${apiUrl}. Received:`, data);
+          console.warn(`[Pricing] Price not found or null in GCE API response for ${apiUrl}. Received:`, data);
+          // price remains null
         }
       }
     } else {
+      // For Azure and AWS, fetch from GCS
       let providerPathSegment = '';
       if (provider === 'Azure') providerPathSegment = 'azure_prices_python';
       else if (provider === 'AWS') providerPathSegment = 'EC2';
@@ -327,22 +375,25 @@ export const fetchPricingData = async (
       if (providerPathSegment) {
         const gcsDataUrl = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/${providerPathSegment}/${regionId}/${instanceId}/${pricingModelValue}.json`;
         console.log(`[Pricing] Attempting to fetch ${provider} pricing data from GCS: ${gcsDataUrl}`);
-        const response = await fetch(gcsDataUrl, { cache: 'no-store' });
+        const response = await fetch(gcsDataUrl, { cache: 'no-store' }); // Disable cache
         responseText = await response.text();
 
         if (!response.ok) {
           console.error(`[Pricing] HTTP error fetching ${provider} pricing from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
           console.error(`[Pricing] ${provider} GCS Error Response Body: ${responseText}`);
+          // price remains null
         } else {
             const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = JSON.parse(responseText);
             if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
                 price = parseFloat(Math.max(0.000001, gcsDataObject.hourlyPrice).toFixed(6));
             } else {
                 console.warn(`[Pricing] Hourly price not found or not a number in ${provider} GCS data for ${gcsDataUrl}. Received data:`, gcsDataObject);
+                // price remains null
             }
         }
       } else {
         console.warn(`[Pricing] No provider path segment defined for ${provider}. Cannot fetch pricing.`);
+        // price remains null
       }
     }
   } catch (error: any) {
@@ -351,14 +402,15 @@ export const fetchPricingData = async (
     console.error(`  Error Message: ${error.message}`);
     if (error.stack) console.error('  Error stack:', error.stack);
     if (responseText) console.error(`  Raw text content (first 500 chars) that may have caused parsing error: ${responseText.substring(0, 500)}`);
+    // price remains null
   }
 
-  console.log(`[Pricing] Result for ${provider} ${instanceId} in ${regionId} (${pricingModelValue}): Price = ${price}`);
+  console.log(`[Pricing] Result for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}, label: ${modelDetails.label}): Price = ${price}`);
   return {
     provider,
     machineFamilyId: instanceId,
     machineFamilyName,
-    price,
+    price, // This will be null if any error occurred or price wasn't found
     regionId,
     regionName,
     pricingModelLabel: modelDetails.label,
