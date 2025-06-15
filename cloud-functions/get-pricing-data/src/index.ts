@@ -163,6 +163,7 @@ function parseAzureCsvForPrice(
     console.error(`[GCF/parseAzureCsvForPrice] CSV file ${filePath} is missing one or more required Azure columns. Expected: '${azureInstanceNameCol}', '${azureReservationTermCol}', '${azureMeterNameCol}', '${azurePriceCol}'. Found headers: ${headerRow.join(', ')}.`);
     return null;
   }
+  console.log(`[GCF/parseAzureCsvForPrice] Searching for Azure instance '${targetInstanceId}' with model '${targetPricingModel}' in CSV ${filePath}.`);
 
   const lowerTargetPricingModel = targetPricingModel.toLowerCase();
 
@@ -251,8 +252,11 @@ function parseGenericCsvForPrice(
   const pricingModelColIndex = headerRow.indexOf(modelColumnName.toLowerCase());
   const hourlyPriceColIndex = headerRow.indexOf(priceColumnName.toLowerCase());
 
+  console.log(`[GCF/parseGenericCsvForPrice] Searching for instance '${targetInstanceId}' with model '${targetPricingModel}' in generic CSV ${filePath}.`);
+  console.log(`[GCF/parseGenericCsvForPrice] Using column indices: InstanceName=${instanceNameColIndex} ('${instanceColumnName}'), PricingModel=${pricingModelColIndex} ('${modelColumnName}'), HourlyPrice=${hourlyPriceColIndex} ('${priceColumnName}').`);
+
   if (instanceNameColIndex === -1 || pricingModelColIndex === -1 || hourlyPriceColIndex === -1) {
-    const errMsg = `CSV file ${filePath} is missing required columns for generic parsing. Expected '${instanceColumnName}', '${modelColumnName}', '${priceColumnName}'. Found headers: ${headerRow.join(', ')}. Please check CSV format.`;
+    const errMsg = `CSV file ${filePath} is missing one or more required columns for generic parsing. Expected '${instanceColumnName}', '${modelColumnName}', '${priceColumnName}'. Found headers: ${headerRow.join(', ')}. Please check CSV format.`;
     console.error(`[GCF/parseGenericCsvForPrice] ${errMsg}`);
     return null;
   }
@@ -260,12 +264,15 @@ function parseGenericCsvForPrice(
   const normalizedTargetPricingModel = targetPricingModel.toLowerCase();
 
   for (let i = 1; i < rows.length; i++) {
-    const row = rows[i].trim();
-    if (!row) continue; 
+    const rowString = rows[i]?.trim();
+    if (!rowString) {
+      // console.warn(`[GCF/parseGenericCsvForPrice] Skipping empty row ${i+1} in ${filePath}.`);
+      continue; 
+    }
 
-    const rowValues = row.split(',');
+    const rowValues = rowString.split(',');
     if (rowValues.length <= Math.max(instanceNameColIndex, pricingModelColIndex, hourlyPriceColIndex)) {
-        // console.warn(`[GCF/parseGenericCsvForPrice] Skipping short row ${i+1} in ${filePath}. Values: ${rowValues.join(',')}`);
+        // console.warn(`[GCF/parseGenericCsvForPrice] Skipping short row ${i+1} in ${filePath}. Values: '${rowString}', Expected min columns: ${Math.max(instanceNameColIndex, pricingModelColIndex, hourlyPriceColIndex) + 1}`);
         continue;
     }
     
@@ -276,17 +283,20 @@ function parseGenericCsvForPrice(
     const csvInstanceId = typeof csvInstanceIdStr === 'string' ? csvInstanceIdStr.trim() : '';
     const csvPricingModel = typeof csvPricingModelStr === 'string' ? csvPricingModelStr.trim().toLowerCase() : '';
     
+    // console.log(`[GCF/parseGenericCsvForPrice] Row ${i+1}: CSV Instance='${csvInstanceId}', CSV Model='${csvPricingModel}', Target Model='${normalizedTargetPricingModel}'`);
+
     if (csvInstanceId === targetInstanceId && csvPricingModel === normalizedTargetPricingModel) {
+      console.log(`[GCF/parseGenericCsvForPrice] Found matching row for ${targetInstanceId} (${targetPricingModel}) in ${filePath}. Raw price string: '${csvHourlyPriceStr}'`);
       const price = parseFloat(csvHourlyPriceStr); 
       if (!isNaN(price)) {
-        console.log(`[GCF/parseGenericCsvForPrice] Successfully found price in generic CSV ${filePath} for ${targetInstanceId} (${targetPricingModel}): ${price}`);
+        console.log(`[GCF/parseGenericCsvForPrice] Successfully parsed price: ${price}`);
         return price;
       } else {
-        console.warn(`[GCF/parseGenericCsvForPrice] Found matching row for ${targetInstanceId} in generic CSV ${filePath} but ${priceColumnName} '${csvHourlyPriceStr}' is not a valid number.`);
+        console.warn(`[GCF/parseGenericCsvForPrice] Matched row for ${targetInstanceId} (${targetPricingModel}) but hourly price '${csvHourlyPriceStr}' is not a valid number in ${filePath}.`);
       }
     }
   }
-  console.warn(`[GCF/parseGenericCsvForPrice] Price not found in generic CSV ${filePath} for ${targetInstanceId} with pricing model ${targetPricingModel}.`);
+  console.warn(`[GCF/parseGenericCsvForPrice] Price not found in generic CSV ${filePath} for instance '${targetInstanceId}' with pricing model '${targetPricingModel}'. Checked ${rows.length -1} data rows.`);
   return null;
 }
 
@@ -397,7 +407,7 @@ export const getPricingData: HttpFunction = async (req, res) => {
         } else if (provider === 'Azure') {
              specificErrorMsg += ` Check Azure CSV content for instance '${instanceId}', appropriate 'reservationTerm' and 'meterName' values for model '${pricingModelValue}', and correct column headers (expected: armSkuName, reservationTerm, meterName, unitPrice). Also check GCF logs for parsing details.`;
         } else { // AWS
-            specificErrorMsg += ` Check AWS CSV content, query parameters, and ensure column names ('${awsInstanceColumn}', '${awsModelColumn}', '${awsPriceColumn}') match your CSV headers. Also check GCF logs for parsing details.`;
+            specificErrorMsg += ` Check AWS CSV content for instance '${instanceId}' and model '${pricingModelValue}'. Ensure column names ('${awsInstanceColumn}', '${awsModelColumn}', '${awsPriceColumn}') match your CSV headers, and that a row exists with these exact values. Also check GCF logs for parsing details.`;
         }
         console.warn(`[GCF/getPricingData] FINAL - ${specificErrorMsg}`);
         res.status(404).send({ error: specificErrorMsg });
@@ -405,7 +415,7 @@ export const getPricingData: HttpFunction = async (req, res) => {
 
     } catch (error: any) {
       console.error(`[GCF/getPricingData] CRITICAL - Unhandled error processing CSV (gs://${configuredBucketName}/${filePath}):`, error);
-      let errorMessage = 'Failed to process pricing data CSV from GCS. Check GCF logs for specific error details.';
+      let errorMessage = `Failed to process pricing data CSV from GCS. Check GCF logs for specific error details. Underlying error: ${error.message || 'Unknown error'}`;
       let statusCode = 500;
 
       if (error.code === 403 || (error.errors && error.errors.some((e: any) => e.reason === 'forbidden'))) {
@@ -422,6 +432,8 @@ export const getPricingData: HttpFunction = async (req, res) => {
     }
   });
 };
+
+    
 
     
 
