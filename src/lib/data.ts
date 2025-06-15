@@ -1,9 +1,5 @@
 
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, PricingModel } from './types';
-// Firebase storage is no longer used for core metadata in this version,
-// but keep for potential future use or if pricing data direct fetch is re-enabled.
-// import { storage } from './firebase'; 
-// import { ref, getDownloadURL, type StorageReference } from 'firebase/storage';
 
 export let googleCloudRegions: Region[] = [];
 export let azureRegions: Region[] = [];
@@ -33,19 +29,19 @@ export async function loadProviderMetadata(): Promise<void> {
     try {
       const [gcpRegionsData, azRegionsData, awsRegionsData, mfData] = await Promise.all([
         fetch(coreMetadataFilePaths.googleCloudRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.googleCloudRegions}: ${res.status} ${res.statusText}`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.googleCloudRegions}: ${res.status} ${res.statusText}. Check if the file exists in the /public/metadata directory and if your Next.js dev server is running correctly.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.azureRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.azureRegions}: ${res.status} ${res.statusText}`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.azureRegions}: ${res.status} ${res.statusText}. Check if the file exists in the /public/metadata directory and if your Next.js dev server is running correctly.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.awsRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.awsRegions}: ${res.status} ${res.statusText}`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.awsRegions}: ${res.status} ${res.statusText}. Check if the file exists in the /public/metadata directory and if your Next.js dev server is running correctly.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.machineFamilies, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.machineFamilies}: ${res.status} ${res.statusText}`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.machineFamilies}: ${res.status} ${res.statusText}. Check if the file exists in the /public/metadata directory and if your Next.js dev server is running correctly.`);
           return res.json();
         }),
       ]);
@@ -370,20 +366,20 @@ export const fetchPricingData = async (
         await loadProviderMetadata();
       } catch (error) {
         console.error("[PricingData] CRITICAL: Failed to load core metadata in fetchPricingData. Pricing will be unavailable.", error);
-        const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
+        const modelDetailsFall = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
         return {
           provider, machineFamilyId: instanceId, machineFamilyName: `Error loading: ${instanceId}`, price: null,
-          regionId, regionName: `Error loading: ${regionId}`, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
+          regionId, regionName: `Error loading: ${regionId}`, pricingModelLabel: modelDetailsFall.label, pricingModelValue: modelDetailsFall.value,
         };
       }
     }
   }
   if (!metadataLoaded) { 
       console.error(`[PricingData] Core metadata still not loaded after attempt for provider ${provider}, instance ${instanceId}. Pricing will be unavailable.`);
-      const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
+      const modelDetailsFall = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
       return {
           provider, machineFamilyId: instanceId, machineFamilyName: `Metadata load failed: ${instanceId}`, price: null,
-          regionId, regionName: `Metadata load failed: ${regionId}`, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
+          regionId, regionName: `Metadata load failed: ${regionId}`, pricingModelLabel: modelDetailsFall.label, pricingModelValue: modelDetailsFall.value,
       };
   }
 
@@ -394,31 +390,47 @@ export const fetchPricingData = async (
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
 
-  const apiUrl = `/api/get-pricing-from-gcs?provider=${encodeURIComponent(provider)}&regionId=${encodeURIComponent(regionId)}&instanceId=${encodeURIComponent(instanceId)}&pricingModelValue=${encodeURIComponent(pricingModelValue)}`;
+  const cloudFunctionUrl = process.env.NEXT_PUBLIC_PRICING_FUNCTION_URL;
+
+  if (!cloudFunctionUrl) {
+    console.error("[PricingData] CRITICAL: NEXT_PUBLIC_PRICING_FUNCTION_URL is not set. Cannot fetch pricing data.");
+    return {
+      provider, machineFamilyId: instanceId, machineFamilyName, price: null,
+      regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
+    };
+  }
+
+  const params = new URLSearchParams({
+    provider: provider,
+    regionId: regionId,
+    instanceId: instanceId,
+    pricingModelValue: pricingModelValue,
+  });
+  const fullUrl = `${cloudFunctionUrl}?${params.toString()}`;
 
   try {
-    console.log(`[PricingData] Fetching from API route: ${apiUrl}`);
-    const response = await fetch(apiUrl, { cache: 'no-store' });
+    console.log(`[PricingData] Fetching from Cloud Function: ${fullUrl}`);
+    const response = await fetch(fullUrl, { cache: 'no-store' });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from API" }));
-      console.error(`[PricingData] API Error for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${response.status} ${response.statusText}. Details: ${errorData?.error || 'N/A'}`);
-      // Fallback or specific error handling can be done here if needed
+      const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from Cloud Function" }));
+      console.error(`[PricingData] Cloud Function Error for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${response.status} ${response.statusText}. Details: ${errorData?.error || 'N/A'}`);
     } else {
       const pricingDataObject: { hourlyPrice?: number; [key: string]: any } = await response.json();
       if (pricingDataObject && typeof pricingDataObject.hourlyPrice === 'number') {
         price = parseFloat(Math.max(0.000001, pricingDataObject.hourlyPrice).toFixed(6));
-        console.log(`[PricingData] Successfully fetched and parsed price via API for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${price}`);
+        console.log(`[PricingData] Successfully fetched and parsed price via Cloud Function for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${price}`);
       } else {
-        console.warn(`[PricingData] Hourly price not found or not a number in API response for ${provider} ${instanceId}. Received data:`, pricingDataObject);
+        console.warn(`[PricingData] Hourly price not found or not a number in Cloud Function response for ${provider} ${instanceId}. Received data:`, pricingDataObject);
       }
     }
   } catch (error: any) {
-     let errorMessage = `[PricingData] Client-side error calling API route for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}). URL: '${apiUrl}'. `;
+     let errorMessage = `[PricingData] Client-side error calling Cloud Function for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}). URL: '${fullUrl}'. `;
     if (error.message && error.message.toLowerCase().includes('failed to fetch')) {
-        errorMessage += `NETWORK ERROR ("Failed to fetch") when calling the Next.js API route. This could be due to:
-    - The Next.js development server not running or being unreachable.
-    - **Cloud Workstations Network Policy:** Egress policies might be blocking access even to the application's own API routes if network isolation is very strict.
+        errorMessage += `NETWORK ERROR ("Failed to fetch") when calling the Cloud Function. This could be due to:
+    - The Cloud Function URL being incorrect or the function not being deployed/reachable.
+    - CORS issues if the Cloud Function is not configured to allow requests from your app's domain.
+    - **Cloud Workstations Network Policy:** Egress policies might be blocking access.
     - Local firewall, VPN, or proxy settings on your machine or network.
     - Browser extensions (like ad-blockers or privacy tools) interfering.`;
     } else {
@@ -438,3 +450,4 @@ export const fetchPricingData = async (
     pricingModelValue: modelDetails.value,
   };
 };
+
