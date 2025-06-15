@@ -14,6 +14,8 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   console.log(`[${fileName}] Attempting to fetch metadata from: ${url}`);
 
   let response: Response;
+  let responseText: string = '';
+
   try {
     response = await fetch(url);
   } catch (networkError: any) {
@@ -32,9 +34,8 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   // Check if the request was successful (e.g., not a 404 or 403)
   if (!response.ok) {
     console.error(`[${fileName}] HTTP error fetching metadata from ${url}. Status: ${response.status} ${response.statusText}`);
-    let errorBody = "";
     try {
-      errorBody = await response.text();
+      const errorBody = await response.text();
       console.error(`[${fileName}] HTTP Error Response Body (Status ${response.status}):\n${errorBody}`);
     } catch (bodyReadError: any) {
       console.error(`[${fileName}] Could not read HTTP error response body. Status: ${response.status}. Body Read Error Name: ${bodyReadError.name}, Message: ${bodyReadError.message}`);
@@ -42,7 +43,6 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
     return null;
   }
 
-  let responseText: string;
   try {
     responseText = await response.text();
   } catch (textReadError: any) {
@@ -59,7 +59,6 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   if (!contentType || (!contentType.includes('application/json') && !contentType.includes('text/plain'))) {
       console.warn(`[${fileName}] WARNING: Metadata file from ${url} has unexpected Content-Type: ${contentType}. Expected 'application/json' or 'text/plain'. File will be ignored if parsing fails.`);
       console.warn(`[${fileName}] Raw text content (unexpected Content-Type ${contentType}):\n${responseText}`);
-      // Attempt to parse anyway, it might be JSON served with wrong content type.
   }
 
   try {
@@ -426,28 +425,44 @@ export const fetchPricingData = async (
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
 
+  let response;
+  let responseText = '';
+
   try {
-    const response = await fetch(gcsDataUrl);
-    if (!response.ok) {
-      console.error(`[Pricing] Failed to fetch pricing data from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
-      try {
-        const errorBody = await response.text();
-        console.error(`[Pricing] Response body for failed pricing data fetch: ${errorBody}`);
-      } catch (bodyError) {
-        console.error('[Pricing] Could not read response body for failed pricing data fetch.');
-      }
-      return {
-        provider,
-        machineFamilyId: instanceId,
-        machineFamilyName,
-        price: null,
-        regionId,
-        regionName,
-        pricingModelLabel: modelDetails.label,
-        pricingModelValue: modelDetails.value,
-      };
+    response = await fetch(gcsDataUrl);
+  } catch (networkError: any) {
+    console.error(`[Pricing] Network error during fetch for ${gcsDataUrl}:`);
+    console.error(`  Error Name: ${networkError.name}`);
+    console.error(`  Error Message: ${networkError.message}`);
+    if (networkError.stack) {
+      console.error(`  Error Stack: ${networkError.stack}`);
     }
-    const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = await response.json();
+     if (networkError.cause) {
+        console.error(`  Error Cause:`, networkError.cause);
+    }
+    return {
+      provider, machineFamilyId: instanceId, machineFamilyName, price: null,
+      regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
+    };
+  }
+
+  if (!response.ok) {
+    console.error(`[Pricing] HTTP error fetching pricing data from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
+    try {
+      responseText = await response.text();
+      console.error(`[Pricing] HTTP Error Response Body (Status ${response.status}):\n${responseText}`);
+    } catch (bodyError: any) {
+      console.error(`[Pricing] Could not read HTTP error response body. Status: ${response.status}. Body Read Error Name: ${bodyError.name}, Message: ${bodyError.message}`);
+    }
+    return {
+      provider, machineFamilyId: instanceId, machineFamilyName, price: null,
+      regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
+    };
+  }
+
+  try {
+    responseText = await response.text();
+    const gcsDataObject: { hourlyPrice?: number; [key: string]: any } = JSON.parse(responseText);
 
     let finalPrice = null;
     if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
@@ -458,40 +473,20 @@ export const fetchPricingData = async (
     }
     console.log(`[Pricing] Successfully fetched and calculated price for ${provider} ${instanceId} in ${regionId} (${pricingModelValue}): ${finalPrice}`);
     return {
-      provider,
-      machineFamilyId: instanceId,
-      machineFamilyName,
-      price: finalPrice,
-      regionId,
-      regionName,
-      pricingModelLabel: modelDetails.label,
-      pricingModelValue: modelDetails.value,
+      provider, machineFamilyId: instanceId, machineFamilyName, price: finalPrice,
+      regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
     };
-
   } catch (error: any) {
-    console.error(`[Pricing] Catch block: Error fetching or parsing pricing data from ${gcsDataUrl}:`);
-    if (error instanceof Error) {
-        console.error('  Pricing Error name:', error.name);
-        console.error('  Pricing Error message:', error.message);
-        if (error.stack) {
-         console.error('  Pricing Error stack:', error.stack);
-        }
+    console.error(`[Pricing] Catch block: Error reading or parsing pricing data response from ${gcsDataUrl}:`);
+    console.error(`  Error Name: ${error.name}`);
+    console.error(`  Error Message: ${error.message}`);
+    if (error.stack) {
+     console.error('  Error stack:', error.stack);
     }
-     if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-        console.error('  [Pricing] This is a TypeError "Failed to fetch", strongly indicating a network issue or CORS problem when fetching pricing data.');
-    }
-    if (!(error instanceof Error)) {
-        console.error('  [Pricing] Full error object (pricing data fetch):', error);
-    }
+    console.error(`  Raw text content (if available) that failed for ${gcsDataUrl}:\n${responseText || '(responseText not available)'}`);
     return {
-      provider,
-      machineFamilyId: instanceId,
-      machineFamilyName,
-      price: null,
-      regionId,
-      regionName,
-      pricingModelLabel: modelDetails.label,
-      pricingModelValue: modelDetails.value,
+      provider, machineFamilyId: instanceId, machineFamilyName, price: null,
+      regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
     };
   }
 };
