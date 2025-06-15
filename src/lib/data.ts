@@ -17,6 +17,13 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
     const response = await fetch(url);
     if (!response.ok) {
       console.error(`Failed to fetch metadata file ${fileName}: ${response.status} ${response.statusText} from ${url}`);
+      // Attempt to get more details from the response if it exists, even if not ok
+      try {
+        const errorBody = await response.text();
+        console.error(`Response body for failed fetch: ${errorBody}`);
+      } catch (bodyError) {
+        console.error('Could not read response body for failed fetch.');
+      }
       return null;
     }
     const data = await response.json();
@@ -24,9 +31,36 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
         console.error(`Metadata file ${fileName} from ${url} did not return an array. Data received:`, data);
         return null;
     }
+    console.log(`Successfully fetched and parsed ${fileName} from ${url}. Items: ${data.length}`);
     return data as T[];
   } catch (error) {
-    console.error(`Error fetching or parsing metadata file ${fileName} from ${url}:`, error);
+    console.error(`Catch block: Error fetching or parsing metadata file ${fileName} from ${url}:`);
+    if (error instanceof Error) {
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+    }
+    if (error instanceof TypeError) { // TypeError is common for network errors / CORS
+        console.error('This is a TypeError, often indicating a network issue or CORS problem. Check browser Network tab for details.');
+    }
+    // Attempt to stringify the error for more details, handling circular references
+    try {
+        const getCircularReplacer = () => {
+            const seen = new WeakSet();
+            return (key: string, value: any) => {
+                if (typeof value === "object" && value !== null) {
+                    if (seen.has(value)) {
+                        return "[Circular]";
+                    }
+                    seen.add(value);
+                }
+                return value;
+            };
+        };
+        console.error('Full error object (stringified):', JSON.stringify(error, getCircularReplacer()));
+    } catch (e) {
+        console.error('Could not stringify the full error object.');
+    }
     return null;
   }
 }
@@ -50,12 +84,12 @@ export async function loadProviderMetadata(): Promise<void> {
   awsRegions = awsRegionsData || [];
   machineFamilies = mfData || [];
   
-  metadataLoaded = true;
-  console.log("Provider metadata loading complete from GCS.");
-  console.log("GCP Regions in data.ts (length):", googleCloudRegions.length, googleCloudRegions.length > 0 ? googleCloudRegions[0] : '(empty)');
-  console.log("Azure Regions in data.ts (length):", azureRegions.length, azureRegions.length > 0 ? azureRegions[0] : '(empty)');
-  console.log("AWS Regions in data.ts (length):", awsRegions.length, awsRegions.length > 0 ? awsRegions[0] : '(empty)');
-  console.log("Machine Families in data.ts (length):", machineFamilies.length, machineFamilies.length > 0 ? machineFamilies[0] : '(empty)');
+  metadataLoaded = true; // Set this regardless of individual file success to avoid re-fetching constantly on errors.
+  console.log("Provider metadata loading attempt complete from GCS.");
+  console.log("Loaded Google Cloud Regions:", googleCloudRegions.length, googleCloudRegions.length > 0 ? googleCloudRegions[0] : '(empty or failed to load)');
+  console.log("Loaded Azure Regions:", azureRegions.length, azureRegions.length > 0 ? azureRegions[0] : '(empty or failed to load)');
+  console.log("Loaded AWS Regions:", awsRegions.length, awsRegions.length > 0 ? awsRegions[0] : '(empty or failed to load)');
+  console.log("Loaded Machine Families (all providers):", machineFamilies.length, machineFamilies.length > 0 ? machineFamilies[0] : '(empty or failed to load)');
 }
 
 
@@ -378,6 +412,12 @@ export const fetchPricingData = async (
     const response = await fetch(gcsDataUrl);
     if (!response.ok) {
       console.error(`Failed to fetch pricing data from GCS (${gcsDataUrl}): ${response.status} ${response.statusText}`);
+      try {
+        const errorBody = await response.text();
+        console.error(`Response body for failed pricing data fetch: ${errorBody}`);
+      } catch (bodyError) {
+        console.error('Could not read response body for failed pricing data fetch.');
+      }
       return {
         provider,
         machineFamilyId: instanceId,
@@ -411,7 +451,32 @@ export const fetchPricingData = async (
     };
 
   } catch (error) {
-    console.error(`Error during fetch or parsing for pricing data from ${gcsDataUrl}:`, error);
+    console.error(`Catch block: Error fetching or parsing pricing data from ${gcsDataUrl}:`);
+    if (error instanceof Error) {
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+    }
+     if (error instanceof TypeError) {
+        console.error('This is a TypeError, often indicating a network issue or CORS problem when fetching pricing data.');
+    }
+    try {
+        const getCircularReplacer = () => {
+            const seen = new WeakSet();
+            return (key: string, value: any) => {
+                if (typeof value === "object" && value !== null) {
+                    if (seen.has(value)) {
+                        return "[Circular]";
+                    }
+                    seen.add(value);
+                }
+                return value;
+            };
+        };
+        console.error('Full error object for pricing data fetch (stringified):', JSON.stringify(error, getCircularReplacer()));
+    } catch (e) {
+        console.error('Could not stringify the full error object for pricing data fetch.');
+    }
     return {
       provider,
       machineFamilyId: instanceId,
@@ -424,3 +489,4 @@ export const fetchPricingData = async (
     };
   }
 };
+
