@@ -29,19 +29,19 @@ export async function loadProviderMetadata(): Promise<void> {
     try {
       const [gcpRegionsData, azRegionsData, awsRegionsData, mfData] = await Promise.all([
         fetch(coreMetadataFilePaths.googleCloudRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.googleCloudRegions}: ${res.status} ${res.statusText}.`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.googleCloudRegions}: ${res.status} ${res.statusText}. Check public/metadata folder and Next.js server.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.azureRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.azureRegions}: ${res.status} ${res.statusText}.`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.azureRegions}: ${res.status} ${res.statusText}. Check public/metadata folder and Next.js server.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.awsRegions, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.awsRegions}: ${res.status} ${res.statusText}.`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.awsRegions}: ${res.status} ${res.statusText}. Check public/metadata folder and Next.js server.`);
           return res.json();
         }),
         fetch(coreMetadataFilePaths.machineFamilies, { cache: 'no-store' }).then(res => {
-          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.machineFamilies}: ${res.status} ${res.statusText}.`);
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.machineFamilies}: ${res.status} ${res.statusText}. Check public/metadata folder and Next.js server.`);
           return res.json();
         }),
       ]);
@@ -57,23 +57,23 @@ export async function loadProviderMetadata(): Promise<void> {
 
     } catch (error: any) {
       let detailMessage = `[Metadata] CRITICAL OVERALL ERROR during local metadata loading process: ${error.message}.`;
-      if (error.message && error.message.toLowerCase().includes("failed to fetch")) {
+       if (error.message && error.message.toLowerCase().includes("failed to fetch")) {
         detailMessage += `🔴 A "Failed to fetch" error occurred while trying to load core metadata from /public. This is unexpected for local static assets. Potential causes:
-    1. **Build Issue:** Files might not be correctly copied to 'public/metadata'. Verify they exist.
-    2. **Server Not Running/Reachable:** The Next.js development server might have issues. Check terminal for 'npm run dev'.
-    3. **Cloud Workstations Network Policy:** Check your workstation's network settings. Egress policies might block even internal/localhost resolution in some very restrictive setups, or there could be a proxy interfering. For Cloud Workstations, ensure network access to 'localhost' or the dev server's IP/port is allowed.
+    1. **Build Issue:** Files might not be correctly copied to 'public/metadata'. Verify they exist at this relative path.
+    2. **Server Not Running/Reachable:** The Next.js development server ('npm run dev') might have issues or was stopped. Check terminal.
+    3. **Cloud Workstations Network Policy:** Although less likely for local paths, extremely restrictive egress policies or proxies in Cloud Workstations *could* interfere with how the browser resolves or accesses even localhost/same-origin resources. Check your workstation's network settings and for any active proxies.
     4. **Browser Extensions:** Ad blockers or other extensions could interfere. Try incognito mode.
-    5. **Path Mismatch:** Ensure 'public/metadata/*.json' paths are correct.`;
+    5. **Path Mismatch:** Double-check that 'public/metadata/*.json' paths are exactly correct. Filenames are case-sensitive.`;
       } else if (error instanceof SyntaxError) {
-        detailMessage += `🔴 MALFORMED JSON in one of the local metadata files. Error: ${error.message}. Please validate the JSON content in your 'public/metadata' files.`;
+        detailMessage += `🔴 MALFORMED JSON in one of the local metadata files (e.g. regions.json, machineFamilies.json). Error: ${error.message}. Please validate the JSON content in your 'public/metadata' files.`;
       }
       console.error(detailMessage, error);
       googleCloudRegions = [];
       azureRegions = [];
       awsRegions = [];
       machineFamilies = [];
-      metadataLoaded = false;
-      throw error;
+      metadataLoaded = false; // Explicitly set to false on error
+      throw error; // Re-throw to ensure calling code knows about the failure
     } finally {
       metadataLoadingPromise = null;
     }
@@ -262,16 +262,17 @@ export const getMachineInstancesForFamily = (
 
 export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
+  { value: 'azure-spot', label: 'Azure Spot', providers: ['Azure'], discountFactor: 1.0 }, // Actual discount varies widely for spot
   { value: 'gcp-1yr-cud', label: '1-Year CUD', providers: ['Google Cloud'], discountFactor: 0.70 },
   { value: 'gcp-3yr-cud', label: '3-Year CUD', providers: ['Google Cloud'], discountFactor: 0.50 },
   { value: 'gcp-1yr-flex-cud', label: 'Flexible CUD (1-Year)', providers: ['Google Cloud'], discountFactor: 0.80 },
   { value: 'gcp-3yr-flex-cud', label: 'Flexible CUD (3-Year)', providers: ['Google Cloud'], discountFactor: 0.60 },
-  { value: 'azure-1yr-ri-no-upfront', label: '1-Year RI (No Upfront)', providers: ['Azure'], discountFactor: 0.72 },
-  { value: 'azure-3yr-ri-no-upfront', label: '3-Year RI (No Upfront)', providers: ['Azure'], discountFactor: 0.53 },
-  { value: 'azure-1yr-ri-all-upfront', label: '1-Year RI (All Upfront)', providers: ['Azure'], discountFactor: 0.65 },
-  { value: 'azure-3yr-ri-all-upfront', label: '3-Year RI (All Upfront)', providers: ['Azure'], discountFactor: 0.45 },
-  { value: 'azure-1yr-sp', label: 'Savings Plan (1-Year)', providers: ['Azure'], discountFactor: 0.70 },
-  { value: 'azure-3yr-sp', label: 'Savings Plan (3-Year)', providers: ['Azure'], discountFactor: 0.50 },
+  { value: 'azure-1yr-ri-no-upfront', label: '1-Year RI (No Upfront)', providers: ['Azure'], discountFactor: 0.72 }, // Placeholder, actual discount based on CSV
+  { value: 'azure-3yr-ri-no-upfront', label: '3-Year RI (No Upfront)', providers: ['Azure'], discountFactor: 0.53 }, // Placeholder
+  { value: 'azure-1yr-ri-all-upfront', label: '1-Year RI (All Upfront)', providers: ['Azure'], discountFactor: 0.65 }, // Placeholder
+  { value: 'azure-3yr-ri-all-upfront', label: '3-Year RI (All Upfront)', providers: ['Azure'], discountFactor: 0.45 }, // Placeholder
+  { value: 'azure-1yr-sp', label: 'Savings Plan (1-Year)', providers: ['Azure'], discountFactor: 0.70 }, // Placeholder
+  { value: 'azure-3yr-sp', label: 'Savings Plan (3-Year)', providers: ['Azure'], discountFactor: 0.50 }, // Placeholder
   { value: 'aws-1yr-ec2instance-sp-no-upfront', label: 'EC2 Instance SP (1-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.75 },
   { value: 'aws-3yr-ec2instance-sp-no-upfront', label: 'EC2 Instance SP (3-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.55 },
   { value: 'aws-1yr-ec2instance-sp-partial-upfront', label: 'EC2 Instance SP (1-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.72 },
@@ -293,34 +294,41 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
     .sort((a, b) => {
         if (a.value === 'on-demand') return -1;
         if (b.value === 'on-demand') return 1;
+        if (a.value === 'azure-spot' && provider === 'Azure') return -1; // Spot just after on-demand for Azure
+        if (b.value === 'azure-spot' && provider === 'Azure') return 1;
+
         const getPriority = (label: string, value: string) => {
           if (provider === 'AWS') {
               if (value.includes('ec2instance-sp')) return 1;
               if (value.includes('compute-sp')) return 2;
               return 5;
           }
-          if (label.includes('RI')) return 1;
-          if (label.includes('Savings Plan')) return 2;
-          if (label.includes('Flexible CUD')) return 4;
-          if (label.includes('CUD')) return 3;
+          // Priorities for GCP and Azure
+          if (value.includes('ri-')) return 1; // Azure RIs
+          if (value.includes('-sp')) return 2; // Azure SPs (general, not EC2 specific)
+          if (value.includes('flex-cud')) return 4; // GCP Flex CUDs
+          if (value.includes('-cud')) return 3; // GCP CUDs
           return 5;
         };
         const priorityA = getPriority(a.label, a.value);
         const priorityB = getPriority(b.label, b.value);
         if (priorityA !== priorityB) return priorityA - priorityB;
+
         const getYear = (val: string) => (val.includes('1yr') ? 1 : (val.includes('3yr') ? 3 : 0));
         const yearA = getYear(a.value);
         const yearB = getYear(b.value);
         if (yearA !== yearB) return yearA - yearB;
+        
         const getUpfrontOrder = (val: string) => {
             if (val.includes('noupfront')) return 1;
             if (val.includes('partialupfront')) return 2;
             if (val.includes('allupfront')) return 3;
-            return 0;
+            return 0; // For models without upfront specified (like spot, on-demand)
         };
         const upfrontA = getUpfrontOrder(a.value);
         const upfrontB = getUpfrontOrder(b.value);
         if (upfrontA !== upfrontB) return upfrontA - upfrontB;
+
         return a.label.localeCompare(b.label);
       });
 };
@@ -387,8 +395,8 @@ export const fetchPricingData = async (
   }
 
   const modelDetails = getPricingModelDetails(pricingModelValue) ||
-                     pricingModelOptions.find(m => m.value === 'on-demand') ||
-                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
+                     pricingModelOptions.find(m => m.value === 'on-demand') || // Fallback to on-demand if model not found
+                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; // Ultimate fallback
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
@@ -416,7 +424,7 @@ export const fetchPricingData = async (
 
   try {
     console.log(`[PricingData] Fetching from Cloud Function: ${fullUrl}`);
-    const response = await fetch(fullUrl, { cache: 'no-store' });
+    const response = await fetch(fullUrl, { cache: 'no-store' }); // 'no-store' to always get fresh data
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from Cloud Function" }));
@@ -438,8 +446,8 @@ export const fetchPricingData = async (
     if (error.message && error.message.toLowerCase().includes('failed to fetch')) {
         errorMessage += `NETWORK ERROR ("Failed to fetch") when calling the Cloud Function. This could be due to:
     - The Cloud Function URL being incorrect or the function not being deployed/reachable.
-    - CORS issues if the Cloud Function is not configured to allow requests from your app's domain.
-    - **Cloud Workstations Network Policy:** Egress policies might be blocking access.
+    - CORS issues if the Cloud Function is not configured to allow requests from your app's domain (should be handled by 'cors({ origin: true })' in GCF).
+    - **Cloud Workstations Network Policy:** Egress policies might be blocking access to the GCF URL.
     - Local firewall, VPN, or proxy settings on your machine or network.
     - Browser extensions (like ad-blockers or privacy tools) interfering.`;
     } else {
@@ -453,11 +461,13 @@ export const fetchPricingData = async (
     provider,
     machineFamilyId: instanceId,
     machineFamilyName,
-    price,
+    price, // This will be null if there was an error or price wasn't found
     regionId,
     regionName,
     pricingModelLabel: modelDetails.label,
     pricingModelValue: modelDetails.value,
-    error: gcfErrorDetails,
+    error: gcfErrorDetails, // This will contain the error message if something went wrong
   };
 };
+
+    

@@ -24,8 +24,8 @@ const bucketName = process.env.GCS_BUCKET_NAME;
  */
 function parseGceCsvForPrice(
   csvContent: string,
-  targetMachineFamily: string,
-  targetPricingModel: string,
+  targetMachineFamily: string, // e.g., "e2-standard-2" (after stripping 'gcp-')
+  targetPricingModel: string, // e.g., "on-demand", "gcp-1yr-cud"
   filePath: string
 ): number | null {
   const rows = csvContent.split('\n');
@@ -35,7 +35,18 @@ function parseGceCsvForPrice(
   }
 
   const headerRow = rows[0].trim().toLowerCase().split(',');
-  const machineFamilyColIndex = headerRow.indexOf('machinefamily'); // Matched case-insensitively
+  
+  // ---Expected GCE CSV Column Headers (case-insensitive matching)---
+  const gceMachineFamilyCol = 'machinefamily';
+  const gceOnDemandVcpuCol = 'ondemand_vcpu_per_hour';
+  const gceOnDemandRamCol = 'ondemand_ram_per_gib_hour';
+  const gce1yrCudVcpuCol = 'cud_1yr_vcpu_per_hour';
+  const gce1yrCudRamCol = 'cud_1yr_ram_per_gib_hour';
+  const gce3yrCudVcpuCol = 'cud_3yr_vcpu_per_hour';
+  const gce3yrCudRamCol = 'cud_3yr_ram_per_gib_hour';
+  // ----------------------------------------------------------------
+
+  const machineFamilyColIndex = headerRow.indexOf(gceMachineFamilyCol);
 
   let vcpuPriceColIndex = -1;
   let ramPriceColIndex = -1;
@@ -43,25 +54,25 @@ function parseGceCsvForPrice(
   const lowerTargetPricingModel = targetPricingModel.toLowerCase();
 
   if (lowerTargetPricingModel === 'on-demand') {
-    vcpuPriceColIndex = headerRow.indexOf('ondemand_vcpu_per_hour');
-    ramPriceColIndex = headerRow.indexOf('ondemand_ram_per_gib_hour');
+    vcpuPriceColIndex = headerRow.indexOf(gceOnDemandVcpuCol);
+    ramPriceColIndex = headerRow.indexOf(gceOnDemandRamCol);
   } else if (lowerTargetPricingModel === 'gcp-1yr-cud') {
-    vcpuPriceColIndex = headerRow.indexOf('cud_1yr_vcpu_per_hour');
-    ramPriceColIndex = headerRow.indexOf('cud_1yr_ram_per_gib_hour');
+    vcpuPriceColIndex = headerRow.indexOf(gce1yrCudVcpuCol);
+    ramPriceColIndex = headerRow.indexOf(gce1yrCudRamCol);
   } else if (lowerTargetPricingModel === 'gcp-3yr-cud') {
-    vcpuPriceColIndex = headerRow.indexOf('cud_3yr_vcpu_per_hour');
-    ramPriceColIndex = headerRow.indexOf('cud_3yr_ram_per_gib_hour');
+    vcpuPriceColIndex = headerRow.indexOf(gce3yrCudVcpuCol);
+    ramPriceColIndex = headerRow.indexOf(gce3yrCudRamCol);
   } else {
-    console.warn(`[GCF/parseGceCsvForPrice] Unsupported GCE pricing model '${targetPricingModel}' for CSV parsing in ${filePath}. Only 'on-demand', 'gcp-1yr-cud', 'gcp-3yr-cud' are supported by current CSV headers. Flexible CUDs or other models need different handling or CSV columns.`);
-    return null; // Flexible CUDs or other models not in headers
+    console.warn(`[GCF/parseGceCsvForPrice] Unsupported GCE pricing model '${targetPricingModel}' for CSV parsing in ${filePath}. Only 'on-demand', 'gcp-1yr-cud', 'gcp-3yr-cud' are directly supported by current GCE CSV headers. Flexible CUDs or other models need different handling or CSV columns.`);
+    return null; // Flexible CUDs or other models not directly in headers
   }
 
   if (machineFamilyColIndex === -1) {
-    console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} is missing 'MachineFamily' column. Found headers: ${headerRow.join(', ')}`);
+    console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} is missing '${gceMachineFamilyCol}' column. Found headers: ${headerRow.join(', ')}`);
     return null;
   }
   if (vcpuPriceColIndex === -1 || ramPriceColIndex === -1) {
-    console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} is missing required price columns for pricing model '${targetPricingModel}'. VCPU Col Idx: ${vcpuPriceColIndex}, RAM Col Idx: ${ramPriceColIndex}. Found headers: ${headerRow.join(', ')}`);
+    console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} is missing required price columns for GCE pricing model '${targetPricingModel}'. VCPU Col Idx: ${vcpuPriceColIndex}, RAM Col Idx: ${ramPriceColIndex}. Found headers: ${headerRow.join(', ')}`);
     return null;
   }
 
@@ -82,30 +93,130 @@ function parseGceCsvForPrice(
 
         if (!isNaN(vcpuPrice) && !isNaN(ramPrice)) {
           const totalPrice = vcpuPrice + ramPrice;
-          console.log(`[GCF/parseGceCsvForPrice] Successfully calculated price in CSV ${filePath} for ${targetMachineFamily} (${targetPricingModel}): ${totalPrice} (vCPU: ${vcpuPrice}, RAM: ${ramPrice})`);
+          console.log(`[GCF/parseGceCsvForPrice] Successfully calculated price in GCE CSV ${filePath} for ${targetMachineFamily} (${targetPricingModel}): ${totalPrice} (vCPU: ${vcpuPrice}, RAM: ${ramPrice})`);
           return totalPrice;
         } else {
-          console.warn(`[GCF/parseGceCsvForPrice] Found matching row for ${targetMachineFamily} in ${filePath} but price components are not valid numbers. vCPU_price_str: '${vcpuPriceStr}', RAM_price_str: '${ramPriceStr}'.`);
+          console.warn(`[GCF/parseGceCsvForPrice] Found matching GCE row for ${targetMachineFamily} in ${filePath} but price components are not valid numbers. vCPU_price_str: '${vcpuPriceStr}', RAM_price_str: '${ramPriceStr}'.`);
         }
       }
     }
   }
-  console.warn(`[GCF/parseGceCsvForPrice] Price not found in CSV ${filePath} for machine family ${targetMachineFamily} with pricing model ${targetPricingModel}.`);
+  console.warn(`[GCF/parseGceCsvForPrice] Price not found in GCE CSV ${filePath} for machine family ${targetMachineFamily} with pricing model ${targetPricingModel}.`);
+  return null;
+}
+
+/**
+ * Parses Azure CSV content to find the hourly price for a specific instance and pricing model.
+ * Logic:
+ * - For 'on-demand': reservationTerm is empty, meterName does not contain "Spot".
+ * - For 'azure-spot': reservationTerm is empty, meterName contains "Spot".
+ * - For reservations ('azure-1yr-*', 'azure-3yr-*'): matches reservationTerm "1 Year" or "3 Years".
+ * @param csvContent The full string content of the CSV file.
+ * @param targetInstanceId The Azure instance SKU name (e.g., 'Standard_D2s_v3').
+ * @param targetPricingModel The Azure pricing model value from frontend (e.g., 'on-demand', 'azure-spot', 'azure-1yr-ri-no-upfront').
+ * @param filePath For logging purposes.
+ * @returns The total hourly price as a number, or null if not found or error.
+ */
+function parseAzureCsvForPrice(
+  csvContent: string,
+  targetInstanceId: string,
+  targetPricingModel: string,
+  filePath: string
+): number | null {
+  const rows = csvContent.split('\n');
+  if (rows.length < 2) {
+    console.error(`[GCF/parseAzureCsvForPrice] CSV file ${filePath} has no data rows or is malformed.`);
+    return null;
+  }
+
+  const headerRow = rows[0].trim().toLowerCase().split(',');
+
+  // --- Expected Azure CSV Column Headers (case-insensitive matching) ---
+  // Adjust these if your Azure CSV headers differ
+  const azureInstanceNameCol = 'armskuname'; // Common in Azure exports, e.g. "Standard_D2s_v3"
+  const azureReservationTermCol = 'reservationterm'; // e.g., "", "1 Year", "3 Years"
+  const azureMeterNameCol = 'metername'; // e.g., "D2s v3 Spot", "D2s v3"
+  const azurePriceCol = 'unitprice'; // The hourly price
+  // ------------------------------------------------------------------
+
+  const instanceNameColIndex = headerRow.indexOf(azureInstanceNameCol);
+  const reservationTermColIndex = headerRow.indexOf(azureReservationTermCol);
+  const meterNameColIndex = headerRow.indexOf(azureMeterNameCol);
+  const priceColIndex = headerRow.indexOf(azurePriceCol);
+
+  if (instanceNameColIndex === -1 || reservationTermColIndex === -1 || meterNameColIndex === -1 || priceColIndex === -1) {
+    console.error(`[GCF/parseAzureCsvForPrice] CSV file ${filePath} is missing one or more required Azure columns. Expected: '${azureInstanceNameCol}', '${azureReservationTermCol}', '${azureMeterNameCol}', '${azurePriceCol}'. Found headers: ${headerRow.join(', ')}.`);
+    return null;
+  }
+
+  const lowerTargetPricingModel = targetPricingModel.toLowerCase();
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i].trim();
+    if (!row) continue;
+
+    const rowValues = row.split(',');
+    if (rowValues.length <= Math.max(instanceNameColIndex, reservationTermColIndex, meterNameColIndex, priceColIndex)) {
+        // console.warn(`[GCF/parseAzureCsvForPrice] Skipping short row ${i+1} in ${filePath}. Values: ${rowValues.join(',')}`);
+        continue;
+    }
+
+    const csvInstanceId = rowValues[instanceNameColIndex]?.trim();
+    if (csvInstanceId !== targetInstanceId) {
+      continue; // Not the instance we're looking for
+    }
+
+    const csvReservationTerm = rowValues[reservationTermColIndex]?.trim().toLowerCase();
+    const csvMeterName = rowValues[meterNameColIndex]?.trim().toLowerCase();
+    const csvPriceStr = rowValues[priceColIndex]?.trim();
+    const price = parseFloat(csvPriceStr);
+
+    if (isNaN(price)) {
+      // console.warn(`[GCF/parseAzureCsvForPrice] Invalid price '${csvPriceStr}' for instance ${csvInstanceId} in ${filePath}.`);
+      continue;
+    }
+    
+    let modelMatch = false;
+    if (lowerTargetPricingModel === 'on-demand') {
+      if ((!csvReservationTerm || csvReservationTerm === 'null' || csvReservationTerm === 'na') && !csvMeterName.includes('spot')) {
+        modelMatch = true;
+      }
+    } else if (lowerTargetPricingModel === 'azure-spot') {
+      if ((!csvReservationTerm || csvReservationTerm === 'null' || csvReservationTerm === 'na') && csvMeterName.includes('spot')) {
+        modelMatch = true;
+      }
+    } else if (lowerTargetPricingModel.includes('1yr') || lowerTargetPricingModel.includes('1 year')) {
+      if (csvReservationTerm.includes('1 year') || csvReservationTerm.includes('1 yr')) {
+        modelMatch = true;
+      }
+    } else if (lowerTargetPricingModel.includes('3yr') || lowerTargetPricingModel.includes('3 years')) {
+      if (csvReservationTerm.includes('3 years') || csvReservationTerm.includes('3 yr')) {
+        modelMatch = true;
+      }
+    }
+
+    if (modelMatch) {
+      console.log(`[GCF/parseAzureCsvForPrice] Successfully found Azure price in CSV ${filePath} for ${targetInstanceId} (${targetPricingModel}): ${price}`);
+      return price;
+    }
+  }
+
+  console.warn(`[GCF/parseAzureCsvForPrice] Azure Price not found in CSV ${filePath} for instance ${targetInstanceId} with pricing model ${targetPricingModel}.`);
   return null;
 }
 
 
 /**
- * Parses CSV content (for AWS/Azure) to find the hourly price for a specific instance and pricing model.
+ * Parses generic CSV content (for AWS) to find the hourly price for a specific instance and pricing model.
  * Assumes columns: instance_name, pricing_model, hourly_price
  */
 function parseGenericCsvForPrice(
   csvContent: string,
   targetInstanceId: string,
   targetPricingModel: string,
-  instanceColumnName: string,
-  modelColumnName: string,
-  priceColumnName: string,
+  instanceColumnName: string, // Configurable column name for instance ID
+  modelColumnName: string,    // Configurable column name for pricing model
+  priceColumnName: string,    // Configurable column name for price
   filePath: string // For logging
 ): number | null {
   const rows = csvContent.split('\n');
@@ -132,23 +243,26 @@ function parseGenericCsvForPrice(
     if (!row) continue; 
 
     const rowValues = row.split(',');
-    if (rowValues.length > Math.max(instanceNameColIndex, pricingModelColIndex, hourlyPriceColIndex)) {
-      const csvInstanceId = rowValues[instanceNameColIndex]?.trim();
-      const csvPricingModel = rowValues[pricingModelColIndex]?.trim().toLowerCase();
-      const csvHourlyPriceStr = rowValues[hourlyPriceColIndex]?.trim();
+    if (rowValues.length <= Math.max(instanceNameColIndex, pricingModelColIndex, hourlyPriceColIndex)) {
+        // console.warn(`[GCF/parseGenericCsvForPrice] Skipping short row ${i+1} in ${filePath}. Values: ${rowValues.join(',')}`);
+        continue;
+    }
+    
+    const csvInstanceId = rowValues[instanceNameColIndex]?.trim();
+    const csvPricingModel = rowValues[pricingModelColIndex]?.trim().toLowerCase();
+    const csvHourlyPriceStr = rowValues[hourlyPriceColIndex]?.trim();
 
-      if (csvInstanceId === targetInstanceId && csvPricingModel === normalizedTargetPricingModel) {
-        const price = parseFloat(csvHourlyPriceStr);
-        if (!isNaN(price)) {
-          console.log(`[GCF/parseGenericCsvForPrice] Successfully found price in CSV ${filePath} for ${targetInstanceId} (${targetPricingModel}): ${price}`);
-          return price;
-        } else {
-          console.warn(`[GCF/parseGenericCsvForPrice] Found matching row for ${targetInstanceId} in ${filePath} but ${priceColumnName} '${csvHourlyPriceStr}' is not a valid number.`);
-        }
+    if (csvInstanceId === targetInstanceId && csvPricingModel === normalizedTargetPricingModel) {
+      const price = parseFloat(csvHourlyPriceStr);
+      if (!isNaN(price)) {
+        console.log(`[GCF/parseGenericCsvForPrice] Successfully found price in generic CSV ${filePath} for ${targetInstanceId} (${targetPricingModel}): ${price}`);
+        return price;
+      } else {
+        console.warn(`[GCF/parseGenericCsvForPrice] Found matching row for ${targetInstanceId} in generic CSV ${filePath} but ${priceColumnName} '${csvHourlyPriceStr}' is not a valid number.`);
       }
     }
   }
-  console.warn(`[GCF/parseGenericCsvForPrice] Price not found in CSV ${filePath} for ${targetInstanceId} with pricing model ${targetPricingModel}.`);
+  console.warn(`[GCF/parseGenericCsvForPrice] Price not found in generic CSV ${filePath} for ${targetInstanceId} with pricing model ${targetPricingModel}.`);
   return null;
 }
 
@@ -184,46 +298,52 @@ export const getPricingData: HttpFunction = async (req, res) => {
     let foundPrice: number | null = null;
     let filePath = '';
     
-    // Standard column names for AWS/Azure simple CSVs
-    const awsAzureInstanceColumn = 'instance_name'; 
-    const awsAzureModelColumn = 'pricing_model';
-    const awsAzurePriceColumn = 'hourly_price';
+    // Standard column names for AWS simple CSVs
+    // For Azure and GCE, specific parsers handle column names internally.
+    const awsInstanceColumn = 'instance_name'; 
+    const awsModelColumn = 'pricing_model';
+    const awsPriceColumn = 'hourly_price';
 
     try {
+      const file = storage.bucket(bucketName!).file(filePath); // Initialize file variable
+
       if (provider === 'Google Cloud') {
         gcsFolder = 'GCE';
         csvFileName = `gce_all_models_${regionId}.csv`;
         filePath = `${gcsFolder}/${csvFileName}`;
-        const gceMachineFamilyToLookup = instanceId.replace(/^gcp-/, ''); // e.g., "e2-standard-2" from "gcp-e2-standard-2"
+        // For GCE, instanceId from frontend (e.g., 'gcp-e2-standard-2') needs 'gcp-' prefix stripped
+        // to match 'MachineFamily' column (e.g., 'e2-standard-2') in CSV.
+        const gceMachineFamilyToLookup = instanceId.replace(/^gcp-/, ''); 
         
         console.log(`[GCF/getPricingData] Attempting GCE CSV download: gs://${bucketName}/${filePath}`);
-        const file = storage.bucket(bucketName).file(filePath);
-        const [exists] = await file.exists();
+        const gceFile = storage.bucket(bucketName!).file(filePath);
+        const [exists] = await gceFile.exists();
         if (!exists) {
           console.warn(`[GCF/getPricingData] GCE CSV File not found: gs://${bucketName}/${filePath}`);
           res.status(404).send({ error: `Pricing data CSV not found. File: ${filePath}` });
           return;
         }
-        const [contentBuffer] = await file.download();
+        const [contentBuffer] = await gceFile.download();
         const contentString = contentBuffer.toString();
         foundPrice = parseGceCsvForPrice(contentString, gceMachineFamilyToLookup, pricingModelValue, filePath);
 
       } else if (provider === 'Azure') {
         gcsFolder = 'Azure';
-        csvFileName = `${regionId}_prices.csv`; // e.g., Azure/australiacentral2_prices.csv
+        csvFileName = `${regionId}_prices.csv`; // e.g., Azure/eastus2_prices.csv
         filePath = `${gcsFolder}/${csvFileName}`;
 
         console.log(`[GCF/getPricingData] Attempting Azure CSV download: gs://${bucketName}/${filePath}`);
-        const file = storage.bucket(bucketName).file(filePath);
-        const [exists] = await file.exists();
+        const azureFile = storage.bucket(bucketName!).file(filePath);
+        const [exists] = await azureFile.exists();
         if (!exists) {
           console.warn(`[GCF/getPricingData] Azure CSV File not found: gs://${bucketName}/${filePath}`);
           res.status(404).send({ error: `Pricing data CSV not found. File: ${filePath}` });
           return;
         }
-        const [contentBuffer] = await file.download();
+        const [contentBuffer] = await azureFile.download();
         const contentString = contentBuffer.toString();
-        foundPrice = parseGenericCsvForPrice(contentString, instanceId, pricingModelValue, awsAzureInstanceColumn, awsAzureModelColumn, awsAzurePriceColumn, filePath);
+        // The instanceId from frontend for Azure (e.g., 'Standard_D2s_v3') is used directly.
+        foundPrice = parseAzureCsvForPrice(contentString, instanceId, pricingModelValue, filePath);
       
       } else if (provider === 'AWS') {
         gcsFolder = 'EC2';
@@ -231,16 +351,17 @@ export const getPricingData: HttpFunction = async (req, res) => {
         filePath = `${gcsFolder}/${csvFileName}`;
 
         console.log(`[GCF/getPricingData] Attempting AWS CSV download: gs://${bucketName}/${filePath}`);
-        const file = storage.bucket(bucketName).file(filePath);
-        const [exists] = await file.exists();
+        const awsFile = storage.bucket(bucketName!).file(filePath);
+        const [exists] = await awsFile.exists();
         if (!exists) {
           console.warn(`[GCF/getPricingData] AWS CSV File not found: gs://${bucketName}/${filePath}`);
           res.status(404).send({ error: `Pricing data CSV not found. File: ${filePath}` });
           return;
         }
-        const [contentBuffer] = await file.download();
+        const [contentBuffer] = await awsFile.download();
         const contentString = contentBuffer.toString();
-        foundPrice = parseGenericCsvForPrice(contentString, instanceId, pricingModelValue, awsAzureInstanceColumn, awsAzureModelColumn, awsAzurePriceColumn, filePath);
+        // The instanceId from frontend for AWS (e.g., 'm5.large') is used directly.
+        foundPrice = parseGenericCsvForPrice(contentString, instanceId, pricingModelValue, awsInstanceColumn, awsModelColumn, awsPriceColumn, filePath);
 
       } else {
         res.status(400).send({ error: `Invalid provider: ${provider}` });
@@ -250,13 +371,15 @@ export const getPricingData: HttpFunction = async (req, res) => {
       if (foundPrice !== null) {
         res.status(200).send({ hourlyPrice: foundPrice });
       } else {
-        // Generic error message if price not found, specific details logged by parsers
         let specificErrorMsg = `Price not found for instance ${instanceId} with pricing model ${pricingModelValue} in CSV file ${filePath}.`;
         if (provider === 'Google Cloud') {
-            specificErrorMsg += ` Check GCE CSV content for matching 'MachineFamily' ('${instanceId.replace(/^gcp-/, '')}') and ensure model '${pricingModelValue}' maps to existing VCPU/RAM price columns (e.g., OnDemand_VCPU_per_Hour, CUD_1yr_RAM_per_GiB_Hour).`;
-        } else {
-            specificErrorMsg += ` Check CSV content, query parameters, and ensure column names ('${awsAzureInstanceColumn}', '${awsAzureModelColumn}', '${awsAzurePriceColumn}') match your CSV headers.`;
+            specificErrorMsg += ` Check GCE CSV content for matching 'MachineFamily' ('${instanceId.replace(/^gcp-/, '')}') and ensure model '${pricingModelValue}' maps to existing VCPU/RAM price columns (e.g., OnDemand_VCPU_per_Hour, CUD_1yr_RAM_per_GiB_Hour). Also check GCF logs for parsing details.`;
+        } else if (provider === 'Azure') {
+             specificErrorMsg += ` Check Azure CSV content for instance '${instanceId}', appropriate 'reservationTerm' and 'meterName' values for model '${pricingModelValue}', and correct column headers (expected: armSkuName, reservationTerm, meterName, unitPrice). Also check GCF logs for parsing details.`;
+        } else { // AWS
+            specificErrorMsg += ` Check AWS CSV content, query parameters, and ensure column names ('${awsInstanceColumn}', '${awsModelColumn}', '${awsPriceColumn}') match your CSV headers. Also check GCF logs for parsing details.`;
         }
+        console.warn(`[GCF/getPricingData] FINAL - ${specificErrorMsg}`);
         res.status(404).send({ error: specificErrorMsg });
       }
 
@@ -273,7 +396,7 @@ export const getPricingData: HttpFunction = async (req, res) => {
           statusCode = 404;
       } else if (error.message?.includes("CSV file is missing required columns") || error.message?.includes("has no data rows or is malformed")) {
           errorMessage = error.message; 
-          statusCode = 500; // It's a server-side data format issue
+          statusCode = 500;
       }
       res.status(statusCode).send({ error: errorMessage, details: error.message });
     }
