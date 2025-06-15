@@ -1,112 +1,56 @@
 
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, PricingModel, CpuDetails } from './types';
 
-// These will be populated by loadProviderMetadata
+// Direct imports for metadata from the local project structure
+// This assumes your tsconfig.json paths are set up for "@/" to point to "src/"
+// and the files exist at "src/metadata_for_gcs/"
+import gcpRegionsDataJson from '@/metadata_for_gcs/googleCloudRegions.json';
+import azRegionsDataJson from '@/metadata_for_gcs/azureRegions.json';
+import awsRegionsDataJson from '@/metadata_for_gcs/awsRegions.json';
+import mfDataJson from '@/metadata_for_gcs/machineFamilies.json';
+
+
+// These will be populated by direct imports
 export let googleCloudRegions: Region[] = [];
 export let azureRegions: Region[] = [];
 export let awsRegions: Region[] = [];
 export let machineFamilies: MachineFamily[] = [];
 let metadataLoaded = false;
-const GCS_BUCKET_NAME = 'firestore-cloud-comparator'; // Make sure this matches your bucket name
 
-async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
-  const url = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`;
-  let response: Response;
-  let responseText: string = '';
+// GCS_BUCKET_NAME is still needed for fetchPricingData, assuming pricing JSONs are still on GCS.
+const GCS_BUCKET_NAME = 'firestore-cloud-comparator';
 
-  console.log(`[${fileName}] Attempting to fetch from: ${url}`);
-  try {
-    response = await fetch(url, { cache: 'no-store' }); // Added cache: 'no-store'
-  } catch (networkError: any) {
-    console.error(`[${fileName}] Network error during fetch for ${url}:`);
-    console.error(`  Error Name: ${networkError.name}`);
-    console.error(`  Error Message: ${networkError.message}`);
-    if (networkError.stack) {
-      console.error(`  Error Stack: ${networkError.stack}`);
-    }
-    if (networkError.cause) {
-        console.error(`  Error Cause:`, networkError.cause);
-    }
-    return null;
-  }
-
-  console.log(`[${fileName}] Fetch attempt for ${url} completed with status: ${response.status}`);
-
-  if (!response.ok) {
-    console.error(`[${fileName}] HTTP error fetching metadata from ${url}. Status: ${response.status} ${response.statusText}`);
-    try {
-      responseText = await response.text(); // Attempt to get error body
-      console.error(`[${fileName}] HTTP Error Response Body (Status ${response.status}):\n${responseText}`);
-    } catch (bodyReadError: any) {
-      console.error(`[${fileName}] Could not read HTTP error response body. Status: ${response.status}. Body Read Error Name: ${bodyReadError.name}, Message: ${bodyReadError.message}`);
-    }
-    return null;
-  }
-
-  try {
-    responseText = await response.text();
-  } catch (textReadError: any) {
-    console.error(`[${fileName}] Error reading response text from ${url}:`);
-    console.error(`  Error Name: ${textReadError.name}`);
-    console.error(`  Error Message: ${textReadError.message}`);
-    if (textReadError.stack) {
-      console.error(`  Error Stack: ${textReadError.stack}`);
-    }
-    return null;
-  }
-
-  const contentType = response.headers.get('content-type');
-  if (!contentType || (!contentType.includes('application/json') && !contentType.includes('text/plain'))) {
-      console.warn(`[${fileName}] WARNING: Metadata file from ${url} has unexpected Content-Type: ${contentType}. Expected 'application/json' or 'text/plain'. File will be ignored if parsing fails.`);
-      console.warn(`[${fileName}] Raw text content (unexpected Content-Type ${contentType}):\n${responseText}`);
-  }
-
-  try {
-    const data = JSON.parse(responseText);
-    if (!Array.isArray(data)) {
-      console.error(`[${fileName}] Parsed data from ${url} is not an array. Content:\n${responseText}\nParsed as:`, data);
-      return null;
-    }
-    console.log(`[${fileName}] Successfully fetched and parsed from ${url}. Items: ${data.length}`);
-    return data as T[];
-  } catch (jsonParseError: any) {
-    console.error(`[${fileName}] ERROR parsing JSON content from ${url}:`);
-    console.error(`  Parse Error Name: ${jsonParseError.name}`);
-    console.error(`  Parse Error Message: ${jsonParseError.message}`);
-    if (jsonParseError.stack) {
-        console.error(`  Parse Error Stack: ${jsonParseError.stack}`);
-    }
-    console.error(`  Raw text content that failed JSON parsing for ${fileName}:\n${responseText}`);
-    return null;
-  }
-}
-
-export async function loadProviderMetadata(): Promise<void> {
+export function loadProviderMetadata(): void {
   if (metadataLoaded) {
-    console.log("Metadata already loaded. Skipping re-fetch.");
+    console.log("Metadata already loaded from local files. Skipping re-population.");
     return;
   }
-  console.log("Loading provider metadata from GCS...");
+  console.log("Loading provider metadata from local JSON files...");
 
-  const [gcpRegionsData, azRegionsData, awsRegionsData, mfData] = await Promise.all([
-    fetchMetadataFile<Region>('googleCloudRegions.json'),
-    fetchMetadataFile<Region>('azureRegions.json'),
-    fetchMetadataFile<Region>('awsRegions.json'),
-    fetchMetadataFile<MachineFamily>('machineFamilies.json')
-  ]);
+  try {
+    // Perform type assertions to ensure the imported data matches the expected types
+    googleCloudRegions = (gcpRegionsDataJson as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
+    azureRegions = (azRegionsDataJson as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
+    awsRegions = (awsRegionsDataJson as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
+    machineFamilies = (mfDataJson as MachineFamily[] || []); // Assuming MachineFamily is the correct type
 
-  googleCloudRegions = (gcpRegionsData || []).sort((a, b) => a.name.localeCompare(b.name));
-  azureRegions = (azRegionsData || []).sort((a, b) => a.name.localeCompare(b.name));
-  awsRegions = (awsRegionsData || []).sort((a, b) => a.name.localeCompare(b.name));
-  machineFamilies = mfData || []; // Sorting for machineFamilies is done later if needed
+    metadataLoaded = true;
 
-  metadataLoaded = true;
+    console.log("Provider metadata loading from local files complete.");
+    console.log("Loaded Google Cloud Regions:", googleCloudRegions.length, googleCloudRegions.length > 0 ? `First region: ${googleCloudRegions[0].id}` : '(empty or failed to load)');
+    console.log("Loaded Azure Regions:", azureRegions.length, azureRegions.length > 0 ? `First region: ${azureRegions[0].id}` : '(empty or failed to load)');
+    console.log("Loaded AWS Regions:", awsRegions.length, awsRegions.length > 0 ? `First region: ${awsRegions[0].id}` : '(empty or failed to load)');
+    console.log("Loaded Machine Families (all providers):", machineFamilies.length, machineFamilies.length > 0 ? `First family: ${machineFamilies[0].id}` : '(empty or failed to load)');
 
-  console.log("Provider metadata loading attempt complete from GCS.");
-  console.log("Loaded Google Cloud Regions:", googleCloudRegions.length, googleCloudRegions.length > 0 ? `First region: ${googleCloudRegions[0].id}` : '(empty or failed to load)');
-  console.log("Loaded Azure Regions:", azureRegions.length, azureRegions.length > 0 ? `First region: ${azureRegions[0].id}` : '(empty or failed to load)');
-  console.log("Loaded AWS Regions:", awsRegions.length, awsRegions.length > 0 ? `First region: ${awsRegions[0].id}` : '(empty or failed to load)');
-  console.log("Loaded Machine Families (all providers):", machineFamilies.length, machineFamilies.length > 0 ? `First family: ${machineFamilies[0].id}` : '(empty or failed to load)');
+  } catch (error) {
+    console.error("Error processing local metadata JSON files. This might be due to incorrect JSON structure or type mismatches:", error);
+    // Ensure arrays are empty on error to prevent downstream issues
+    googleCloudRegions = [];
+    azureRegions = [];
+    awsRegions = [];
+    machineFamilies = [];
+    metadataLoaded = false; // Indicate failure
+  }
 }
 
 export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
@@ -116,9 +60,9 @@ export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   else if (provider === 'AWS') regions = awsRegions;
 
   if (regions.length === 0 && metadataLoaded) {
-    console.warn(`Metadata loaded, but no regions found for provider ${provider} in getGeosForProvider. This means either the GCS file was empty/malformed or the module array wasn't populated correctly.`);
+    console.warn(`Metadata loaded, but no regions found for provider ${provider} in getGeosForProvider. This means either the local JSON file was empty/malformed or the import failed.`);
   } else if (regions.length === 0 && !metadataLoaded) {
-     console.warn(`Metadata not yet loaded when getGeosForProvider for ${provider} was called. This is expected during initial render. Regions for ${provider} will be empty initially.`);
+     console.warn(`Metadata not yet loaded (or failed to load) when getGeosForProvider for ${provider} was called. Regions for ${provider} will be empty initially.`);
   }
 
   const geos = Array.from(new Set(regions.map(r => r.geo)));
@@ -132,16 +76,17 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   else if (provider === 'AWS') allRegions = awsRegions;
 
    if (allRegions.length === 0 && metadataLoaded) {
-    console.warn(`Metadata loaded, but no regions available for provider ${provider} in getRegionsForProvider. Check GCS metadata files or population of module arrays.`);
+    console.warn(`Metadata loaded, but no regions available for provider ${provider} in getRegionsForProvider. Check local JSON files or import statements.`);
   } else if (allRegions.length === 0 && !metadataLoaded) {
-     console.warn(`Metadata not yet loaded when getRegionsForProvider for ${provider} was called. Region list for ${provider} will be empty initially.`);
+     console.warn(`Metadata not yet loaded (or failed to load) when getRegionsForProvider for ${provider} was called. Region list for ${provider} will be empty initially.`);
   }
 
 
   if (geo) {
     return allRegions.filter(region => region.geo === geo).sort((a,b) => a.name.localeCompare(b.name));
   }
-  return allRegions.sort((a,b) => a.name.localeCompare(b.name)); // Already sorted at loadProviderMetadata
+  // Already sorted during loadProviderMetadata
+  return allRegions;
 };
 
 export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | null, ramInGB: number | null } => {
@@ -150,9 +95,9 @@ export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | 
     if (machine.cpu.toLowerCase().includes('shared')) {
       cpuCount = 0.5;
     } else {
-      const cpuMatch = machine.cpu.match(/(\d+)/);
+      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/); // Allow for decimal vCPUs if ever needed
       if (cpuMatch && cpuMatch[1]) {
-        cpuCount = parseInt(cpuMatch[1], 10);
+        cpuCount = parseFloat(cpuMatch[1]);
       }
     }
   }
@@ -184,7 +129,7 @@ export const getMachineFamilyGroups = (
     console.warn(`Metadata loaded, but machineFamilies is empty in getMachineFamilyGroups. Filtering for provider ${provider} will yield no results.`);
     return [];
   } else if (machineFamilies.length === 0 && !metadataLoaded) {
-    console.warn(`Metadata not yet loaded when getMachineFamilyGroups for ${provider} was called. Machine family groups for ${provider} will be empty initially.`);
+    console.warn(`Metadata not yet loaded (or failed to load) when getMachineFamilyGroups for ${provider} was called. Machine family groups for ${provider} will be empty initially.`);
     return [];
   }
 
@@ -207,6 +152,7 @@ export const getMachineFamilyGroups = (
           cpuMatch = specs.cpuCount >= minCpu;
         }
       } else if (minCpu !== undefined && specs.cpuCount === null) {
+        // If filter is applied but machine has no CPU spec, it doesn't match unless minCpu is 0 or less
         cpuMatch = minCpu <= 0;
       }
 
@@ -220,6 +166,7 @@ export const getMachineFamilyGroups = (
           ramMatch = specs.ramInGB >= userMinRamGB;
         }
       } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
+         // If filter is applied but machine has no RAM spec, it doesn't match unless userMinRamGB is 0 or less
         ramMatch = userMinRamGB <= 0;
       }
       return cpuMatch && ramMatch;
@@ -242,7 +189,7 @@ export const getMachineInstancesForFamily = (
     console.warn(`Metadata loaded, but machineFamilies is empty in getMachineInstancesForFamily. Instances for provider ${provider} and familyGroup ${familyGroup} will be empty.`);
     return [];
   } else if (machineFamilies.length === 0 && !metadataLoaded) {
-    console.warn(`Metadata not yet loaded when getMachineInstancesForFamily for ${provider} / ${familyGroup} was called. Instances will be empty initially.`);
+    console.warn(`Metadata not yet loaded (or failed to load) when getMachineInstancesForFamily for ${provider} / ${familyGroup} was called. Instances will be empty initially.`);
     return [];
   }
 
@@ -396,6 +343,9 @@ export const getPricingModelDetails = (modelValue: string): PricingModel | undef
   return pricingModelOptions.find(m => m.value === modelValue);
 };
 
+// This function continues to fetch specific pricing JSONs from GCS.
+// If these also need to be local, this will require further significant changes
+// to map the dynamic parameters to local file paths or a local API.
 export const fetchPricingData = async (
   provider: CloudProvider,
   regionId: string,
@@ -422,7 +372,7 @@ export const fetchPricingData = async (
   let responseText = '';
 
   try {
-    response = await fetch(gcsDataUrl, { cache: 'no-store' }); // Added cache: 'no-store'
+    response = await fetch(gcsDataUrl, { cache: 'no-store' });
   } catch (networkError: any) {
     console.error(`[Pricing] Network error during fetch for ${gcsDataUrl}:`);
     console.error(`  Error Name: ${networkError.name}`);
@@ -459,7 +409,7 @@ export const fetchPricingData = async (
 
     let finalPrice = null;
     if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
-      finalPrice = gcsDataObject.hourlyPrice; // Discount factor should be applied by the GCS file structure if specific pricing files are used
+      finalPrice = gcsDataObject.hourlyPrice;
       finalPrice = parseFloat(Math.max(0.000001, finalPrice).toFixed(6))
     } else {
       console.warn(`[Pricing] Hourly price not found or not a number in GCS data for ${gcsDataUrl}. Received data:`, gcsDataObject);
