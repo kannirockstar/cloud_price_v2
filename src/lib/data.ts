@@ -1,6 +1,6 @@
 
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, PricingModel } from './types';
-import { storage } from './firebase'; // Import Firebase storage instance
+import { storage } from './firebase'; 
 import { ref, getDownloadURL, type StorageReference } from 'firebase/storage';
 
 export let googleCloudRegions: Region[] = [];
@@ -10,12 +10,12 @@ export let machineFamilies: MachineFamily[] = [];
 let metadataLoaded = false;
 let metadataLoadingPromise: Promise<void> | null = null;
 
-const metadataFileNames = [
-  'googleCloudRegions.json',
-  'azureRegions.json',
-  'awsRegions.json',
-  'machineFamilies.json',
-];
+const coreMetadataFilePaths: { [key: string]: string } = {
+  googleCloudRegions: '/metadata/googleCloudRegions.json',
+  azureRegions: '/metadata/azureRegions.json',
+  awsRegions: '/metadata/awsRegions.json',
+  machineFamilies: '/metadata/machineFamilies.json',
+};
 
 export async function loadProviderMetadata(): Promise<void> {
   if (metadataLoaded) {
@@ -28,94 +28,45 @@ export async function loadProviderMetadata(): Promise<void> {
   }
 
   metadataLoadingPromise = (async () => {
-    if (!storage) {
-      console.error("[Metadata] CRITICAL: Firebase Storage instance is not available. Ensure NEXT_PUBLIC_FIREBASE_... variables are set in .env and Firebase is initialized in src/lib/firebase.ts.");
-      metadataLoaded = false;
-      metadataLoadingPromise = null;
-      throw new Error("Firebase Storage not initialized. Cannot load metadata.");
-    } else {
-      console.log("[Metadata] Firebase Storage instance confirmed available.");
-    }
-
     try {
-      const results = await Promise.all(
-        metadataFileNames.map(async (fileName) => {
-          const filePath = `metadata/${fileName}`;
-          console.log(`[Metadata] Processing ${fileName} (path: ${filePath})`);
-          let downloadURL = '';
-          try {
-            console.log(`[Metadata] Getting ref for: ${filePath}`);
-            const fileRef: StorageReference = ref(storage, filePath);
-            console.log(`[Metadata] Attempting getDownloadURL for: ${filePath}`);
-            downloadURL = await getDownloadURL(fileRef);
-            console.log(`[Metadata] Successfully got downloadURL for ${fileName}: ${downloadURL}`);
+      const [gcpRegionsData, azRegionsData, awsRegionsData, mfData] = await Promise.all([
+        fetch(coreMetadataFilePaths.googleCloudRegions, { cache: 'no-store' }).then(res => {
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.googleCloudRegions}: ${res.status} ${res.statusText}`);
+          return res.json();
+        }),
+        fetch(coreMetadataFilePaths.azureRegions, { cache: 'no-store' }).then(res => {
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.azureRegions}: ${res.status} ${res.statusText}`);
+          return res.json();
+        }),
+        fetch(coreMetadataFilePaths.awsRegions, { cache: 'no-store' }).then(res => {
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.awsRegions}: ${res.status} ${res.statusText}`);
+          return res.json();
+        }),
+        fetch(coreMetadataFilePaths.machineFamilies, { cache: 'no-store' }).then(res => {
+          if (!res.ok) throw new Error(`Failed to fetch ${coreMetadataFilePaths.machineFamilies}: ${res.status} ${res.statusText}`);
+          return res.json();
+        }),
+      ]);
 
-            console.log(`[Metadata] Attempting to fetch ${fileName} using downloadURL: ${downloadURL}`);
-            const response = await fetch(downloadURL, { cache: 'no-store' });
-            
-            if (!response.ok) {
-              const errorText = await response.text();
-              let detailMessage = `[Metadata] HTTP error fetching ${fileName} (URL: ${downloadURL}). Status: ${response.status} ${response.statusText}. Response: ${errorText}. `;
-              if (response.status === 403) {
-                detailMessage += `A 403 error on a Firebase download URL usually means Firebase Storage rules are denying access. Check your storage.rules. Ensure they allow public read for '${filePath}' or 'metadata/**'.`;
-              } else if (response.status === 404) {
-                 detailMessage += `A 404 error means the file was not found at the path '${filePath}' in your Firebase Storage bucket ('${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}') when trying to use the download URL. Verify the file exists.`;
-              }
-              console.error(detailMessage);
-              throw new Error(detailMessage);
-            }
-            console.log(`[Metadata] Successfully fetched ${fileName}. Status: ${response.status}. Attempting to parse JSON.`);
-            const jsonData = await response.json();
-            console.log(`[Metadata] Successfully parsed JSON for ${fileName}.`);
-            return jsonData;
-          } catch (fileError: any) {
-            let errorMessage = `[Metadata] Error processing ${fileName}. Path: '${filePath}'. `;
-            if (downloadURL) {
-              errorMessage += `Attempted Download URL: '${downloadURL}'. `;
-            }
-            if (fileError.message.includes('storage/object-not-found') || (fileError.code && fileError.code === 'storage/object-not-found')) {
-              errorMessage += `FILE NOT FOUND in Firebase Storage at path '${filePath}'. Please verify the file exists. Bucket: '${storage.app.options.storageBucket || 'UNKNOWN BUCKET'}'.`;
-            } else if (fileError.message.includes('storage/unauthorized') || (fileError.code && fileError.code === 'storage/unauthorized')) {
-              errorMessage += `UNAUTHORIZED to access file '${filePath}' in Firebase Storage (e.g. via getDownloadURL). Check Firebase Storage rules (storage.rules). They might be denying read access.`;
-            } else if (fileError.message.toLowerCase().includes('failed to fetch')) {
-               errorMessage += `NETWORK ERROR ("Failed to fetch") or issue with download URL. The browser could not complete the network request. This could be due to:
-    - No internet connection or unstable connection.
-    - DNS resolution failure for the host: '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
-    - **Cloud Workstations Network Policy:** Egress (outbound) network policies on your Cloud Workstation might be blocking access to external URLs like Firebase Storage. Check your workstation's or organization's network configuration.
-    - Local firewall, VPN, or proxy settings on your machine or network.
-    - Browser extensions (like ad-blockers or privacy tools) interfering.
-    - The Firebase Storage service itself might be temporarily unavailable (check Firebase status page).`;
-            } else if (fileError instanceof SyntaxError) { 
-              errorMessage += `MALFORMED JSON in file '${fileName}'. Please validate the JSON content.`;
-            } else if (fileError.message.includes('Firebase Storage:')) { 
-              errorMessage += `FIREBASE STORAGE SDK ERROR: ${fileError.message} (Code: ${fileError.code || 'N/A'}). This could be an issue with initialization, permissions, or the file itself.`;
-            }
-            else {
-              errorMessage += `Details: ${fileError.message}. Full error object: ${JSON.stringify(fileError)}. Code: ${fileError.code || 'N/A'}`;
-            }
-            console.error(errorMessage, fileError);
-            throw new Error(`Could not load or parse ${fileName}. ${errorMessage}`);
-          }
-        })
-      );
-
-      googleCloudRegions = (results[0] as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
-      azureRegions = (results[1] as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
-      awsRegions = (results[2] as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
-      machineFamilies = (results[3] as MachineFamily[] || []);
+      googleCloudRegions = (gcpRegionsData as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
+      azureRegions = (azRegionsData as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
+      awsRegions = (awsRegionsData as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
+      machineFamilies = (mfData as MachineFamily[] || []);
 
       metadataLoaded = true;
-      console.log("[Metadata] Provider metadata fetching from Firebase Storage successful.");
+      console.log("[Metadata] Core metadata loaded from local /public directory successfully.");
       console.log(`[Metadata] Loaded ${googleCloudRegions.length} GCP regions, ${azureRegions.length} Azure regions, ${awsRegions.length} AWS regions, ${machineFamilies.length} machine families.`);
     
     } catch (error: any) {
-      console.error("[Metadata] CRITICAL OVERALL ERROR during metadata loading process (using getDownloadURL):", error.message, error);
-      if (error.message && (error.message.includes("storage/object-not-found") || (error.code && error.code === 'storage/object-not-found'))) {
-         console.error(`[Metadata] 🔴 An "object-not-found" error means a file (e.g., one of ${metadataFileNames.join(', ')}) was not found at the expected path in your Firebase Storage bucket ('metadata/' folder). Verify all metadata files are uploaded correctly to 'gs://${storage.app.options.storageBucket || 'YOUR_BUCKET_NAME'}/metadata/'.`);
-      } else if (error.message && (error.message.includes("storage/unauthorized") || (error.code && error.code === 'storage/unauthorized'))) {
-         console.error(`[Metadata] 🔴 An "unauthorized" error using getDownloadURL often indicates your Firebase Storage rules are denying access. Please check your \`storage.rules\` file and ensure it allows public read access, for example: \`rules_version = '2'; service firebase.storage { match /b/{bucket}/o { match /{allPaths=**} { allow read; allow write: if request.auth != null; } } }\` and that these rules have been deployed.`);
-      } else if (error.message && error.message.includes("NEXT_PUBLIC_FIREBASE_")) {
-         console.error("[Metadata] 🔴 This error might be due to missing or incorrect Firebase configuration environment variables (NEXT_PUBLIC_FIREBASE_...). Please ensure your .env file is correctly set up with values from your Firebase project's web app config, and your Next.js server has been restarted.");
+      console.error("[Metadata] CRITICAL OVERALL ERROR during local metadata loading process:", error.message, error);
+      if (error.message && error.message.toLowerCase().includes("failed to fetch")) {
+        console.error(`[Metadata] 🔴 A "Failed to fetch" error occurred while trying to load core metadata from /public. This is unexpected as these files should be served by the Next.js dev server itself. Potential causes:
+    1. **Build Issue:** The files might not have been correctly copied to the 'public/metadata' directory, or Next.js build process might have an issue. Verify the files exist in 'public/metadata'.
+    2. **Server Not Running/Reachable:** The Next.js development server might not be running correctly or is unreachable from your browser. Check the terminal where 'npm run dev' was executed.
+    3. **Network Configuration:** Extremely restrictive local network configurations (firewalls, proxies) or Cloud Workstation policies could even interfere with localhost or internal traffic, though less common for local static assets.
+    4. **Path Mismatch:** Ensure 'public/metadata/*.json' paths are correct and accessible.`);
+      } else if (error instanceof SyntaxError) {
+        console.error(`[Metadata] 🔴 MALFORMED JSON in one of the local metadata files. Error: ${error.message}. Please validate the JSON content in your 'public/metadata' files.`);
       }
       googleCloudRegions = [];
       azureRegions = [];
@@ -123,11 +74,12 @@ export async function loadProviderMetadata(): Promise<void> {
       machineFamilies = [];
       metadataLoaded = false; 
       throw error; 
+    } finally {
+      metadataLoadingPromise = null;
     }
   })();
   return metadataLoadingPromise;
 }
-
 
 export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   if (!metadataLoaded) {
@@ -406,14 +358,14 @@ export const fetchPricingData = async (
 ): Promise<PriceData> => {
   if (!metadataLoaded) {
     if (metadataLoadingPromise) {
-      console.log("[PricingData] Metadata loading is in progress. Awaiting completion before fetching pricing data...");
+      console.log("[PricingData] Core metadata loading is in progress. Awaiting completion before fetching pricing data...");
       await metadataLoadingPromise;
     } else {
-      console.warn("[PricingData] Metadata not loaded and no loading promise found. Attempting to load metadata first.");
+      console.warn("[PricingData] Core metadata not loaded and no loading promise found. Attempting to load metadata first.");
       try {
         await loadProviderMetadata();
       } catch (error) {
-        console.error("[PricingData] CRITICAL: Failed to load metadata in fetchPricingData. Pricing will be unavailable.", error);
+        console.error("[PricingData] CRITICAL: Failed to load core metadata in fetchPricingData. Pricing will be unavailable.", error);
         const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
         return {
           provider, machineFamilyId: instanceId, machineFamilyName: `Error loading: ${instanceId}`, price: null,
@@ -423,7 +375,7 @@ export const fetchPricingData = async (
     }
   }
   if (!metadataLoaded) { 
-      console.error(`[PricingData] Metadata still not loaded after attempt for provider ${provider}, instance ${instanceId}. Pricing will be unavailable.`);
+      console.error(`[PricingData] Core metadata still not loaded after attempt for provider ${provider}, instance ${instanceId}. Pricing will be unavailable.`);
       const modelDetails = getPricingModelDetails(pricingModelValue) || { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
       return {
           provider, machineFamilyId: instanceId, machineFamilyName: `Metadata load failed: ${instanceId}`, price: null,
@@ -463,7 +415,7 @@ export const fetchPricingData = async (
     const pricingFileRef = ref(storage, pricingFilePath);
     console.log(`[PricingData] Getting download URL for ${provider} price: ${pricingFilePath}`);
     downloadURL = await getDownloadURL(pricingFileRef);
-    console.log(`[PricingData] Fetching ${provider} pricing for ${instanceId} from download URL: ${downloadURL}`); 
+    console.log(`[PricingData] Attempting to fetch ${provider} pricing for ${instanceId} using downloadURL: ${downloadURL}`); 
     
     const response = await fetch(downloadURL, { cache: 'no-store' });
 
@@ -491,7 +443,7 @@ export const fetchPricingData = async (
         errorMessage += `Attempted Download URL: '${downloadURL}'. `;
     }
     if (error.message.toLowerCase().includes('failed to fetch')) {
-        errorMessage += `NETWORK ERROR ("Failed to fetch") or issue with download URL. The browser could not complete the network request. This could be due to:
+      errorMessage += `NETWORK ERROR ("Failed to fetch") or issue with download URL. The browser could not complete the network request. This could be due to:
     - No internet connection or unstable connection.
     - DNS resolution failure for the host: '${new URL(downloadURL || 'https://firebasestorage.googleapis.com').hostname}'.
     - **Cloud Workstations Network Policy:** Egress (outbound) network policies on your Cloud Workstation might be blocking access to external URLs like Firebase Storage. Check your workstation's or organization's network configuration.
@@ -525,4 +477,3 @@ export const fetchPricingData = async (
   };
 };
 
-    
