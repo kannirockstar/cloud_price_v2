@@ -22,8 +22,7 @@ import {
   getMachineFamilyGroups,
   getMachineInstancesForFamily,
   fetchPricingData,
-  getPricingModelsForProvider,
-  loadProviderMetadata, // Import loadProviderMetadata
+  loadProviderMetadata,
 } from '@/lib/data';
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, CpuDetails } from '@/lib/types';
 
@@ -34,13 +33,11 @@ export default function CloudPriceComparatorPage() {
 
   const [isMetadataLoading, setIsMetadataLoading] = useState(true);
 
-  // Global Custom CPU and RAM filters
   const [customCpu, setCustomCpu] = useState<string>('');
   const [customRam, setCustomRam] = useState<string>('');
   const [filterSapCertified, setFilterSapCertified] = useState(false);
   const [applyToleranceFilter, setApplyToleranceFilter] = useState(false);
 
-  // State for selections
   const [selectedGoogleGeo, setSelectedGoogleGeo] = useState<string>('');
   const [selectedAzureGeo, setSelectedAzureGeo] = useState<string>('');
   const [selectedAwsGeo, setSelectedAwsGeo] = useState<string>('');
@@ -89,7 +86,6 @@ export default function CloudPriceComparatorPage() {
   const [azureSapsRating, setAzureSapsRating] = useState<number | null>(null);
   const [awsSapsRating, setAwsSapsRating] = useState<number | null>(null);
 
-  // State for individual provider prices and loading
   const [googlePriceData, setGooglePriceData] = useState<PriceData | null>(null);
   const [azurePriceData, setAzurePriceData] = useState<PriceData | null>(null);
   const [awsPriceData, setAwsPriceData] = useState<PriceData | null>(null);
@@ -98,55 +94,54 @@ export default function CloudPriceComparatorPage() {
   const [isAzurePriceLoading, setIsAzurePriceLoading] = useState(false);
   const [isAwsPriceLoading, setIsAwsPriceLoading] = useState(false);
 
-  // Load metadata from GCS on component mount
+  const initMetadata = useCallback(async () => {
+    console.log('[CloudPriceComparatorPage] Starting initMetadata...');
+    setIsMetadataLoading(true);
+    try {
+      await loadProviderMetadata();
+      console.log('[CloudPriceComparatorPage] loadProviderMetadata finished successfully.');
+
+      const gcpGeos = getGeosForProvider('Google Cloud');
+      console.log('[CloudPriceComparatorPage] GCP Geos from getGeosForProvider:', gcpGeos.length);
+      setGoogleGeoOptions(gcpGeos);
+
+      const azGeos = getGeosForProvider('Azure');
+      console.log('[CloudPriceComparatorPage] Azure Geos from getGeosForProvider:', azGeos.length);
+      setAzureGeoOptions(azGeos);
+
+      const awsGeos = getGeosForProvider('AWS');
+      console.log('[CloudPriceComparatorPage] AWS Geos from getGeosForProvider:', awsGeos.length);
+      setAwsGeoOptions(awsGeos);
+      
+      setGooglePricingModelOptions(getPricingModelsForProvider('Google Cloud'));
+      setAzurePricingModelOptions(getPricingModelsForProvider('Azure'));
+      setAwsPricingModelOptions(getPricingModelsForProvider('AWS'));
+
+      console.log('[CloudPriceComparatorPage] Geo and pricing model options set.');
+
+    } catch (error) {
+      console.error("[CloudPriceComparatorPage] CRITICAL: Failed to initialize metadata in component:", error);
+      toast({
+        variant: "destructive",
+        title: "Metadata Initialization Error",
+        description: "Could not load essential configuration data. Dropdowns may be empty or non-functional. Please check browser console for detailed error messages from 'src/lib/data.ts' and verify Firebase setup.",
+        duration: 10000,
+      });
+    } finally {
+      console.log('[CloudPriceComparatorPage] Setting isMetadataLoading to false in finally block.');
+      setIsMetadataLoading(false);
+    }
+  }, [toast]);
+
   useEffect(() => {
-    const initMetadata = async () => {
-      console.log('CloudPriceComparatorPage: Starting initMetadata...');
-      setIsMetadataLoading(true);
-      try {
-        await loadProviderMetadata(); // Await the GCS fetch
-        console.log('CloudPriceComparatorPage: loadProviderMetadata finished.');
-
-        const gcpGeos = getGeosForProvider('Google Cloud');
-        console.log('CloudPriceComparatorPage: GCP Geos from getGeosForProvider:', gcpGeos);
-        setGoogleGeoOptions(gcpGeos);
-
-        const azGeos = getGeosForProvider('Azure');
-        console.log('CloudPriceComparatorPage: Azure Geos from getGeosForProvider:', azGeos);
-        setAzureGeoOptions(azGeos);
-
-        const awsGeos = getGeosForProvider('AWS');
-        console.log('CloudPriceComparatorPage: AWS Geos from getGeosForProvider:', awsGeos);
-        setAwsGeoOptions(awsGeos);
-        
-        setGooglePricingModelOptions(getPricingModelsForProvider('Google Cloud'));
-        setAzurePricingModelOptions(getPricingModelsForProvider('Azure'));
-        setAwsPricingModelOptions(getPricingModelsForProvider('AWS'));
-
-        console.log('CloudPriceComparatorPage: Geo and pricing model options set.');
-
-      } catch (error) {
-        console.error("CloudPriceComparatorPage: Failed to initialize metadata:", error);
-        toast({
-          variant: "destructive",
-          title: "Metadata Error",
-          description: "Failed to load provider metadata from GCS. Dropdowns may be empty or non-functional. Please ensure GCS files are correctly placed in 'metadata/' folder and publicly accessible.",
-        });
-      } finally {
-        console.log('CloudPriceComparatorPage: Setting isMetadataLoading to false.');
-        setIsMetadataLoading(false);
-      }
-    };
     initMetadata();
-  }, [toast]); // This useEffect runs once on mount
+  }, [initMetadata]);
 
 
-  // Initialize selected geos - dependent on metadata loading and geo options population
  useEffect(() => {
     if (!isMetadataLoading && googleGeoOptions.length > 0 && !selectedGoogleGeo) {
       const northAmericaOption = googleGeoOptions.find(o => o.value === 'North America');
       setSelectedGoogleGeo(northAmericaOption ? northAmericaOption.value : googleGeoOptions[0].value);
-      console.log('CloudPriceComparatorPage: Default Google Geo set to:', northAmericaOption ? northAmericaOption.value : googleGeoOptions[0].value);
     }
   }, [googleGeoOptions, selectedGoogleGeo, isMetadataLoading]);
 
@@ -154,7 +149,6 @@ export default function CloudPriceComparatorPage() {
     if (!isMetadataLoading && azureGeoOptions.length > 0 && !selectedAzureGeo) {
       const northAmericaOption = azureGeoOptions.find(o => o.value === 'North America');
       setSelectedAzureGeo(northAmericaOption ? northAmericaOption.value : azureGeoOptions[0].value);
-      console.log('CloudPriceComparatorPage: Default Azure Geo set to:', northAmericaOption ? northAmericaOption.value : azureGeoOptions[0].value);
     }
   }, [azureGeoOptions, selectedAzureGeo, isMetadataLoading]);
 
@@ -162,12 +156,10 @@ export default function CloudPriceComparatorPage() {
     if (!isMetadataLoading && awsGeoOptions.length > 0 && !selectedAwsGeo) {
       const northAmericaOption = awsGeoOptions.find(o => o.value === 'North America');
       setSelectedAwsGeo(northAmericaOption ? northAmericaOption.value : awsGeoOptions[0].value);
-      console.log('CloudPriceComparatorPage: Default AWS Geo set to:', northAmericaOption ? northAmericaOption.value : awsGeoOptions[0].value);
     }
   }, [awsGeoOptions, selectedAwsGeo, isMetadataLoading]);
 
 
-  // ---- START: GEO SELECTION ----
   useEffect(() => {
     setGoogleRegionOptions([]); setSelectedGoogleRegion('');
     setGoogleFamilyGroupOptions([]); setSelectedGoogleFamilyGroup('');
@@ -179,7 +171,7 @@ export default function CloudPriceComparatorPage() {
       setGoogleRegionOptions(regions);
       if (regions.length > 0) {
         if (selectedGoogleGeo === 'North America') {
-          const defaultRegion = regions.find(r => r.id === 'us-central1'); // Iowa
+          const defaultRegion = regions.find(r => r.id === 'us-central1');
           setSelectedGoogleRegion(defaultRegion ? defaultRegion.id : regions[0].id);
         } else {
           setSelectedGoogleRegion(regions[0].id);
@@ -199,7 +191,7 @@ export default function CloudPriceComparatorPage() {
       setAzureRegionOptions(regions);
       if (regions.length > 0) {
          if (selectedAzureGeo === 'North America') {
-          const defaultRegion = regions.find(r => r.id === 'eastus2'); // Virginia (East US 2)
+          const defaultRegion = regions.find(r => r.id === 'eastus2');
           setSelectedAzureRegion(defaultRegion ? defaultRegion.id : regions[0].id);
         } else {
           setSelectedAzureRegion(regions[0].id);
@@ -219,7 +211,7 @@ export default function CloudPriceComparatorPage() {
       setAwsRegionOptions(regions);
       if (regions.length > 0) {
         if (selectedAwsGeo === 'North America') {
-          const defaultRegion = regions.find(r => r.id === 'us-east-1'); // N. Virginia
+          const defaultRegion = regions.find(r => r.id === 'us-east-1');
           setSelectedAwsRegion(defaultRegion ? defaultRegion.id : regions[0].id);
         } else {
           setSelectedAwsRegion(regions[0].id);
@@ -227,13 +219,11 @@ export default function CloudPriceComparatorPage() {
       }
     }
   }, [selectedAwsGeo, isMetadataLoading]);
-  // ---- END: GEO SELECTION ----
 
   const parsedCustomCpu = customCpu ? parseInt(customCpu) : undefined;
   const parsedCustomRam = customRam ? parseInt(customRam) : undefined;
   const shouldUseTolerance = filterSapCertified && applyToleranceFilter;
 
-  // ---- START: REGION / CUSTOM CPU / CUSTOM RAM / SAP FILTER / TOLERANCE FILTER SELECTION ----
   useEffect(() => {
     setGoogleFamilyGroupOptions([]); setSelectedGoogleFamilyGroup('');
     setGoogleInstanceOptions([]); setSelectedGoogleInstance('');
@@ -267,7 +257,6 @@ export default function CloudPriceComparatorPage() {
       if (familyGroups.length > 0) setSelectedAwsFamilyGroup(familyGroups[0].value); else setSelectedAwsFamilyGroup('');
     }
   }, [selectedAwsRegion, customCpu, customRam, filterSapCertified, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance, isMetadataLoading]);
-  // ---- END: REGION / CUSTOM CPU / CUSTOM RAM / SAP FILTER / TOLERANCE FILTER SELECTION ----
 
   const updateCpuDetails = (instances: MachineFamily[], setter: React.Dispatch<React.SetStateAction<CpuDetails | null>>) => {
     if (instances.length > 0) {
@@ -278,7 +267,6 @@ export default function CloudPriceComparatorPage() {
     }
   };
 
-  // ---- START: FAMILY GROUP / SAP FILTER / TOLERANCE FILTER SELECTION ----
   useEffect(() => {
     setGoogleInstanceOptions([]); setSelectedGoogleInstance('');
     setGoogleCpuDetails(null); setGoogleSapsRating(null); setGooglePriceData(null);
@@ -323,9 +311,7 @@ export default function CloudPriceComparatorPage() {
         setAwsCpuDetails(null);
     }
   }, [selectedAwsFamilyGroup, filterSapCertified, customCpu, customRam, selectedAwsRegion, applyToleranceFilter, parsedCustomCpu, parsedCustomRam, shouldUseTolerance, isMetadataLoading]);
-  // ---- END: FAMILY GROUP / SAP FILTER / TOLERANCE FILTER SELECTION ----
 
-  // ---- START: INSTANCE SELECTION ----
   useEffect(() => {
     setGooglePriceData(null); setGoogleSapsRating(null);
     if (selectedGoogleInstance && !isMetadataLoading) { 
@@ -367,16 +353,12 @@ export default function CloudPriceComparatorPage() {
         setAwsSapsRating(null);
     }
   }, [selectedAwsInstance, awsInstanceOptions, filterSapCertified, isMetadataLoading]);
-  // ---- END: INSTANCE SELECTION ----
 
-  // ---- START: PRICING MODEL SELECTION ----
   useEffect(() => { setGooglePriceData(null); }, [selectedGooglePricingModel]);
   useEffect(() => { setAzurePriceData(null); }, [selectedAzurePricingModel]);
   useEffect(() => { setAwsPriceData(null); }, [selectedAwsPricingModel]);
-  // ---- END: PRICING MODEL SELECTION ----
 
 
-  // Fetch Google Cloud Price
   useEffect(() => {
     if (selectedGoogleRegion && selectedGoogleInstance && selectedGooglePricingModel && !isMetadataLoading) {
       setIsGooglePriceLoading(true);
@@ -384,16 +366,15 @@ export default function CloudPriceComparatorPage() {
         .then(setGooglePriceData)
         .catch(error => {
           console.error("Error fetching Google Cloud price:", error);
-          toast({ variant: "destructive", title: "Error", description: "Failed to fetch Google Cloud price." });
+          toast({ variant: "destructive", title: "Pricing Error", description: `Failed to fetch Google Cloud price for ${selectedGoogleInstance}. Check console.` });
           setGooglePriceData(null);
         })
         .finally(() => setIsGooglePriceLoading(false));
     } else if (!isMetadataLoading) {
-      setGooglePriceData(null); // Clear price if inputs are not ready
+      setGooglePriceData(null);
     }
   }, [selectedGoogleRegion, selectedGoogleInstance, selectedGooglePricingModel, toast, isMetadataLoading]);
 
-  // Fetch Azure Price
   useEffect(() => {
     if (selectedAzureRegion && selectedAzureInstance && selectedAzurePricingModel && !isMetadataLoading) {
       setIsAzurePriceLoading(true);
@@ -401,7 +382,7 @@ export default function CloudPriceComparatorPage() {
         .then(setAzurePriceData)
         .catch(error => {
           console.error("Error fetching Azure price:", error);
-          toast({ variant: "destructive", title: "Error", description: "Failed to fetch Azure price." });
+          toast({ variant: "destructive", title: "Pricing Error", description: `Failed to fetch Azure price for ${selectedAzureInstance}. Check console.` });
           setAzurePriceData(null);
         })
         .finally(() => setIsAzurePriceLoading(false));
@@ -410,7 +391,6 @@ export default function CloudPriceComparatorPage() {
     }
   }, [selectedAzureRegion, selectedAzureInstance, selectedAzurePricingModel, toast, isMetadataLoading]);
 
-  // Fetch AWS Price
   useEffect(() => {
     if (selectedAwsRegion && selectedAwsInstance && selectedAwsPricingModel && !isMetadataLoading) {
       setIsAwsPriceLoading(true);
@@ -418,7 +398,7 @@ export default function CloudPriceComparatorPage() {
         .then(setAwsPriceData)
         .catch(error => {
           console.error("Error fetching AWS price:", error);
-          toast({ variant: "destructive", title: "Error", description: "Failed to fetch AWS price." });
+          toast({ variant: "destructive", title: "Pricing Error", description: `Failed to fetch AWS price for ${selectedAwsInstance}. Check console.` });
           setAwsPriceData(null);
         })
         .finally(() => setIsAwsPriceLoading(false));
@@ -431,7 +411,6 @@ export default function CloudPriceComparatorPage() {
   const renderCpuDetails = (details: CpuDetails | null) => {
     const cpuDetailsWrapperClass = "mt-1 h-5 flex items-center text-xs text-muted-foreground";
     if (isMetadataLoading || !details || (!details.architecture && !details.clockSpeed)) {
-      // Render a placeholder that occupies the same space to prevent layout shifts
       return <div className={`${cpuDetailsWrapperClass} text-transparent`}><Cpu size={12} className="mr-1 opacity-0"/>&nbsp;</div>;
     }
     return (
@@ -446,7 +425,6 @@ export default function CloudPriceComparatorPage() {
   const renderSapsRating = (rating: number | null, isSapFilterActive: boolean) => {
     const sapsRatingWrapperClass = "mt-1 h-5 flex items-center text-xs text-muted-foreground";
     if (isMetadataLoading || !isSapFilterActive || rating === null || rating === undefined) {
-      // Render a placeholder that occupies the same space
       return <div className={`${sapsRatingWrapperClass} text-transparent`}>&nbsp;</div>;
     }
     return (
@@ -461,27 +439,26 @@ export default function CloudPriceComparatorPage() {
     providerName: CloudProvider,
     priceData: PriceData | null,
     isLoading: boolean,
-    googleBasePriceData: PriceData | null // Pass Google's price for comparison
+    googleBasePriceData: PriceData | null
   ) => {
-    const priceDisplayWrapperClass = "mt-2 pt-2 border-t border-dashed"; // Added some top padding and border
-    if (isLoading || isMetadataLoading) { // Check global metadata loading too
+    const priceDisplayWrapperClass = "mt-2 pt-2 border-t border-dashed";
+    if (isLoading || isMetadataLoading) {
       return <div className={`${priceDisplayWrapperClass} flex items-center`}><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading price...</div>;
     }
     if (!priceData || priceData.price === null) {
-      // Render a placeholder for consistent height when no price
-      return <div className={`${priceDisplayWrapperClass} text-transparent`}>&nbsp;</div>;
+      return <div className={`${priceDisplayWrapperClass} text-sm text-muted-foreground`}>Price not available</div>;
     }
 
     const monthlyPrice = priceData.price * HOURS_IN_MONTH;
     let differenceText = '';
     let differencePercentageText = '';
-    let textColorClass = 'text-foreground'; // Default text color
+    let textColorClass = 'text-foreground';
 
     if (providerName !== 'Google Cloud' && googleBasePriceData?.price !== null && googleBasePriceData?.price !== undefined && priceData.price !== null) {
       const googleMonthlyPrice = googleBasePriceData.price * HOURS_IN_MONTH;
       const difference = monthlyPrice - googleMonthlyPrice;
 
-      if (googleMonthlyPrice !== 0) { // Avoid division by zero
+      if (googleMonthlyPrice !== 0) {
           const percentageDifference = (difference / googleMonthlyPrice) * 100;
           if (difference < 0) {
             differenceText = `-$${Math.abs(difference).toFixed(2)}`;
@@ -587,7 +564,6 @@ export default function CloudPriceComparatorPage() {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-            {/* Google Cloud Configuration */}
             <div className="space-y-4 p-4 border rounded-md shadow-sm bg-card">
               <h3 className="text-lg font-medium text-primary flex items-center"><Cloud className="mr-2 h-5 w-5 text-blue-500" />Google Cloud</h3>
               <div>
@@ -635,7 +611,6 @@ export default function CloudPriceComparatorPage() {
               </div>
             </div>
 
-            {/* Azure Configuration */}
             <div className="space-y-4 p-4 border rounded-md shadow-sm bg-card">
               <h3 className="text-lg font-medium text-primary flex items-center"><Cloud className="mr-2 h-5 w-5 text-sky-600" />Azure</h3>
               <div>
@@ -683,7 +658,6 @@ export default function CloudPriceComparatorPage() {
               </div>
             </div>
 
-            {/* AWS Configuration */}
             <div className="space-y-4 p-4 border rounded-md shadow-sm bg-card">
               <h3 className="text-lg font-medium text-primary flex items-center"><Cloud className="mr-2 h-5 w-5 text-orange-500" />AWS</h3>
               <div>
@@ -749,5 +723,4 @@ export default function CloudPriceComparatorPage() {
       </footer>
     </div>
   );
-
 }
