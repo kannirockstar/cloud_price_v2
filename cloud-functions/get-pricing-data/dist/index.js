@@ -42,6 +42,7 @@ filePath) {
     const gce3yrCudRamCol = 'cud_3yr_ram_per_gib_hour';
     // ----------------------------------------------------------------
     const machineFamilyColIndex = headerRow.indexOf(gceMachineFamilyCol);
+    console.log(`[GCF/parseGceCsvForPrice] Header indices for GCE CSV ${filePath}: MachineFamily=${machineFamilyColIndex}, OnDemandVCPU=${headerRow.indexOf(gceOnDemandVcpuCol)}, OnDemandRAM=${headerRow.indexOf(gceOnDemandRamCol)}, 1yrCUDVCPU=${headerRow.indexOf(gce1yrCudVcpuCol)}, 1yrCUDRAM=${headerRow.indexOf(gce1yrCudRamCol)}, 3yrCUDVCPU=${headerRow.indexOf(gce3yrCudVcpuCol)}, 3yrCUDRAM=${headerRow.indexOf(gce3yrCudRamCol)}`);
     let vcpuPriceColIndex = -1;
     let ramPriceColIndex = -1;
     const lowerTargetPricingModel = targetPricingModel.toLowerCase();
@@ -74,21 +75,31 @@ filePath) {
         if (!row)
             continue;
         const rowValues = row.split(',');
-        if (rowValues.length > Math.max(machineFamilyColIndex, vcpuPriceColIndex, ramPriceColIndex)) {
-            const csvMachineFamily = rowValues[machineFamilyColIndex]?.trim();
-            if (csvMachineFamily === targetMachineFamily) {
-                const vcpuPriceStr = rowValues[vcpuPriceColIndex]?.trim();
-                const ramPriceStr = rowValues[ramPriceColIndex]?.trim();
-                const vcpuPrice = parseFloat(vcpuPriceStr);
-                const ramPrice = parseFloat(ramPriceStr);
-                if (!isNaN(vcpuPrice) && !isNaN(ramPrice)) {
-                    const totalPrice = vcpuPrice + ramPrice;
-                    console.log(`[GCF/parseGceCsvForPrice] Successfully calculated price in GCE CSV ${filePath} for ${targetMachineFamily} (${targetPricingModel}): ${totalPrice} (vCPU: ${vcpuPrice}, RAM: ${ramPrice})`);
-                    return totalPrice;
-                }
-                else {
-                    console.warn(`[GCF/parseGceCsvForPrice] Found matching GCE row for ${targetMachineFamily} in ${filePath} but price components are not valid numbers. vCPU_price_str: '${vcpuPriceStr}', RAM_price_str: '${ramPriceStr}'.`);
-                }
+        if (rowValues.length <= Math.max(machineFamilyColIndex, vcpuPriceColIndex, ramPriceColIndex)) {
+            // console.warn(`[GCF/parseGceCsvForPrice] Skipping short row ${i+1} in ${filePath}. Values: ${rowValues.join(',')}, Expected min columns: ${Math.max(machineFamilyColIndex, vcpuPriceColIndex, ramPriceColIndex) +1}`);
+            continue;
+        }
+        const csvMachineFamily = rowValues[machineFamilyColIndex]?.trim();
+        if (csvMachineFamily === targetMachineFamily) {
+            console.log(`[GCF/parseGceCsvForPrice] Found matching machine family '${targetMachineFamily}' in GCE CSV ${filePath} at row ${i + 1}.`);
+            const vcpuPriceStr = rowValues[vcpuPriceColIndex]?.trim();
+            const ramPriceStr = rowValues[ramPriceColIndex]?.trim();
+            console.log(`[GCF/parseGceCsvForPrice] Raw price strings for ${targetMachineFamily} (${targetPricingModel}): VCPU='${vcpuPriceStr}', RAM='${ramPriceStr}'`);
+            const vcpuPrice = parseFloat(vcpuPriceStr);
+            const ramPrice = parseFloat(ramPriceStr);
+            if (isNaN(vcpuPrice)) {
+                console.warn(`[GCF/parseGceCsvForPrice] VCPU price string '${vcpuPriceStr}' for ${targetMachineFamily} resulted in NaN.`);
+            }
+            if (isNaN(ramPrice)) {
+                console.warn(`[GCF/parseGceCsvForPrice] RAM price string '${ramPriceStr}' for ${targetMachineFamily} resulted in NaN.`);
+            }
+            if (!isNaN(vcpuPrice) && !isNaN(ramPrice)) {
+                const totalPrice = vcpuPrice + ramPrice;
+                console.log(`[GCF/parseGceCsvForPrice] Successfully calculated price in GCE CSV ${filePath} for ${targetMachineFamily} (${targetPricingModel}): ${totalPrice} (vCPU: ${vcpuPrice}, RAM: ${ramPrice})`);
+                return totalPrice;
+            }
+            else {
+                console.warn(`[GCF/parseGceCsvForPrice] Found matching GCE row for ${targetMachineFamily} in ${filePath} but price components are not valid numbers. vCPU_price_str: '${vcpuPriceStr}', RAM_price_str: '${ramPriceStr}'.`);
             }
         }
     }
@@ -219,11 +230,10 @@ filePath // For logging
         const csvInstanceIdStr = rowValues[instanceNameColIndex];
         const csvPricingModelStr = rowValues[pricingModelColIndex];
         const csvHourlyPriceStr = rowValues[hourlyPriceColIndex];
-        // More robust handling of potentially undefined cell values
         const csvInstanceId = typeof csvInstanceIdStr === 'string' ? csvInstanceIdStr.trim() : '';
         const csvPricingModel = typeof csvPricingModelStr === 'string' ? csvPricingModelStr.trim().toLowerCase() : '';
         if (csvInstanceId === targetInstanceId && csvPricingModel === normalizedTargetPricingModel) {
-            const price = parseFloat(csvHourlyPriceStr); // parseFloat handles undefined/empty strings by returning NaN
+            const price = parseFloat(csvHourlyPriceStr);
             if (!isNaN(price)) {
                 console.log(`[GCF/parseGenericCsvForPrice] Successfully found price in generic CSV ${filePath} for ${targetInstanceId} (${targetPricingModel}): ${price}`);
                 return price;
@@ -261,8 +271,6 @@ const getPricingData = async (req, res) => {
         let csvFileName = '';
         let foundPrice = null;
         let filePath = '';
-        // Standard column names for AWS simple CSVs
-        // For Azure and GCE, specific parsers handle column names internally.
         const awsInstanceColumn = 'instance_name';
         const awsModelColumn = 'pricing_model';
         const awsPriceColumn = 'hourly_price';
@@ -272,8 +280,6 @@ const getPricingData = async (req, res) => {
                 gcsFolder = 'GCE';
                 csvFileName = `gce_all_models_${regionId}.csv`;
                 filePath = `${gcsFolder}/${csvFileName}`;
-                // For GCE, instanceId from frontend (e.g., 'gcp-e2-standard-2') needs 'gcp-' prefix stripped
-                // to match 'MachineFamily' column (e.g., 'e2-standard-2') in CSV.
                 const gceMachineFamilyToLookup = instanceId.replace(/^gcp-/, '');
                 console.log(`[GCF/getPricingData] Attempting GCE CSV download: gs://${configuredBucketName}/${filePath}`);
                 const gceFile = storage.bucket(configuredBucketName).file(filePath);
