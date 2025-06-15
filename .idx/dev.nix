@@ -7,6 +7,9 @@
   packages = [
     pkgs.nodejs_20
     pkgs.zulu
+    pkgs.gcsfuse
+    pkgs.fuse3
+    pkgs.sudo
   ];
   # Sets environment variables in the workspace
   env = {};

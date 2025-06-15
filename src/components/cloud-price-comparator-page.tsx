@@ -123,23 +123,34 @@ export default function CloudPriceComparatorPage() {
       console.log(`[CloudPriceComparatorPage] Google Geo Options Populated: ${gcpGeos.length > 0}, Azure: ${azGeos.length > 0}, AWS: ${awsGeos.length > 0}`);
 
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("[CloudPriceComparatorPage] CRITICAL: Failed to initialize metadata in component:", error);
+      let toastDescription = "Could not load essential configuration data. Dropdowns may be empty or non-functional. Please check browser console for detailed error messages from 'src/lib/data.ts' and verify Firebase setup.";
+      if (error && error.message && error.message.includes("NETWORK ERROR or issue with download URL")) {
+        toastDescription = "Network Error: Could not fetch metadata. Please check your internet connection, firewall/VPN settings, and browser extensions. Then, refresh the page. See console for more details.";
+      } else if (error && error.message && error.message.includes("FILE NOT FOUND")) {
+        toastDescription = "Configuration Error: A required metadata file was not found in Firebase Storage. Please ensure all metadata files are correctly uploaded. See console for details.";
+      } else if (error && error.message && error.message.includes("UNAUTHORIZED")) {
+        toastDescription = "Access Denied: Could not access metadata files in Firebase Storage. Please check your Firebase Storage rules to ensure public read access is allowed. See console for details.";
+      } else if (error && error.message && error.message.includes("MALFORMED JSON")) {
+        toastDescription = "Data Error: A metadata file contains invalid JSON. Please check the format of the files in Firebase Storage. See console for details.";
+      }
+
       toast({
         variant: "destructive",
         title: "Metadata Initialization Error",
-        description: "Could not load essential configuration data. Dropdowns may be empty or non-functional. Please check browser console for detailed error messages from 'src/lib/data.ts' and verify Firebase setup.",
+        description: toastDescription,
         duration: 10000,
       });
     } finally {
       console.log('[CloudPriceComparatorPage] Setting isMetadataLoading to false in finally block.');
       setIsMetadataLoading(false);
     }
-  }, [toast]); // toast is a stable dependency from useToast
+  }, [toast]);
 
   useEffect(() => {
     initMetadata();
-  }, [initMetadata]); // initMetadata is now stable due to useCallback
+  }, [initMetadata]);
 
 
  useEffect(() => {
@@ -715,7 +726,7 @@ export default function CloudPriceComparatorPage() {
        <div className="flex items-center text-xs text-muted-foreground p-2 border-t border-border mt-4">
         <Info size={16} className="mr-2 shrink-0"/>
         <span>
-          All prices are calculated based on public information and typical configurations (hourly rate * {HOURS_IN_MONTH} hours). Percentage differences are calculated relative to the Google Cloud monthly price for the selected configurations.
+          All prices are calculated based on public information and typical configurations (hourly rate * ${HOURS_IN_MONTH} hours). Percentage differences are calculated relative to the Google Cloud monthly price for the selected configurations.
           This tool is for estimation and demonstration purposes and should not be used for actual financial decisions.
         </span>
       </div>
@@ -728,3 +739,5 @@ export default function CloudPriceComparatorPage() {
     </div>
   );
 }
+
+    
