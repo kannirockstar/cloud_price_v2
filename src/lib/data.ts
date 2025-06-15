@@ -7,17 +7,16 @@ export let azureRegions: Region[] = [];
 export let awsRegions: Region[] = [];
 export let machineFamilies: MachineFamily[] = [];
 let metadataLoaded = false;
-const GCS_BUCKET_NAME = 'firestore-cloud-comparator';
+const GCS_BUCKET_NAME = 'firestore-cloud-comparator'; // Make sure this matches your bucket name
 
 async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   const url = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/metadata/${fileName}`;
-  console.log(`[${fileName}] Attempting to fetch metadata from: ${url}`);
-
   let response: Response;
   let responseText: string = '';
 
+  console.log(`[${fileName}] Attempting to fetch from: ${url}`);
   try {
-    response = await fetch(url);
+    response = await fetch(url, { cache: 'no-store' }); // Added cache: 'no-store'
   } catch (networkError: any) {
     console.error(`[${fileName}] Network error during fetch for ${url}:`);
     console.error(`  Error Name: ${networkError.name}`);
@@ -31,12 +30,13 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
     return null;
   }
 
-  // Check if the request was successful (e.g., not a 404 or 403)
+  console.log(`[${fileName}] Fetch attempt for ${url} completed with status: ${response.status}`);
+
   if (!response.ok) {
     console.error(`[${fileName}] HTTP error fetching metadata from ${url}. Status: ${response.status} ${response.statusText}`);
     try {
-      const errorBody = await response.text();
-      console.error(`[${fileName}] HTTP Error Response Body (Status ${response.status}):\n${errorBody}`);
+      responseText = await response.text(); // Attempt to get error body
+      console.error(`[${fileName}] HTTP Error Response Body (Status ${response.status}):\n${responseText}`);
     } catch (bodyReadError: any) {
       console.error(`[${fileName}] Could not read HTTP error response body. Status: ${response.status}. Body Read Error Name: ${bodyReadError.name}, Message: ${bodyReadError.message}`);
     }
@@ -81,7 +81,6 @@ async function fetchMetadataFile<T>(fileName: string): Promise<T[] | null> {
   }
 }
 
-
 export async function loadProviderMetadata(): Promise<void> {
   if (metadataLoaded) {
     console.log("Metadata already loaded. Skipping re-fetch.");
@@ -96,10 +95,10 @@ export async function loadProviderMetadata(): Promise<void> {
     fetchMetadataFile<MachineFamily>('machineFamilies.json')
   ]);
 
-  googleCloudRegions = gcpRegionsData || [];
-  azureRegions = azRegionsData || [];
-  awsRegions = awsRegionsData || [];
-  machineFamilies = mfData || [];
+  googleCloudRegions = (gcpRegionsData || []).sort((a, b) => a.name.localeCompare(b.name));
+  azureRegions = (azRegionsData || []).sort((a, b) => a.name.localeCompare(b.name));
+  awsRegions = (awsRegionsData || []).sort((a, b) => a.name.localeCompare(b.name));
+  machineFamilies = mfData || []; // Sorting for machineFamilies is done later if needed
 
   metadataLoaded = true;
 
@@ -110,17 +109,11 @@ export async function loadProviderMetadata(): Promise<void> {
   console.log("Loaded Machine Families (all providers):", machineFamilies.length, machineFamilies.length > 0 ? `First family: ${machineFamilies[0].id}` : '(empty or failed to load)');
 }
 
-
 export const getGeosForProvider = (provider: CloudProvider): SelectOption[] => {
   let regions: Region[] = [];
   if (provider === 'Google Cloud') regions = googleCloudRegions;
   else if (provider === 'Azure') regions = azureRegions;
   else if (provider === 'AWS') regions = awsRegions;
-
-  console.log(`getGeosForProvider for ${provider}: source regions array length = ${regions.length}`);
-  if (regions.length > 0) {
-    console.log(`First region for ${provider} in getGeosForProvider: id=${regions[0].id}, name=${regions[0].name}, geo=${regions[0].geo}`);
-  }
 
   if (regions.length === 0 && metadataLoaded) {
     console.warn(`Metadata loaded, but no regions found for provider ${provider} in getGeosForProvider. This means either the GCS file was empty/malformed or the module array wasn't populated correctly.`);
@@ -148,7 +141,7 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   if (geo) {
     return allRegions.filter(region => region.geo === geo).sort((a,b) => a.name.localeCompare(b.name));
   }
-  return allRegions.sort((a,b) => a.name.localeCompare(b.name));
+  return allRegions.sort((a,b) => a.name.localeCompare(b.name)); // Already sorted at loadProviderMetadata
 };
 
 export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | null, ramInGB: number | null } => {
@@ -429,7 +422,7 @@ export const fetchPricingData = async (
   let responseText = '';
 
   try {
-    response = await fetch(gcsDataUrl);
+    response = await fetch(gcsDataUrl, { cache: 'no-store' }); // Added cache: 'no-store'
   } catch (networkError: any) {
     console.error(`[Pricing] Network error during fetch for ${gcsDataUrl}:`);
     console.error(`  Error Name: ${networkError.name}`);
@@ -466,12 +459,12 @@ export const fetchPricingData = async (
 
     let finalPrice = null;
     if (gcsDataObject && typeof gcsDataObject.hourlyPrice === 'number') {
-      finalPrice = gcsDataObject.hourlyPrice * modelDetails.discountFactor;
+      finalPrice = gcsDataObject.hourlyPrice; // Discount factor should be applied by the GCS file structure if specific pricing files are used
       finalPrice = parseFloat(Math.max(0.000001, finalPrice).toFixed(6))
     } else {
       console.warn(`[Pricing] Hourly price not found or not a number in GCS data for ${gcsDataUrl}. Received data:`, gcsDataObject);
     }
-    console.log(`[Pricing] Successfully fetched and calculated price for ${provider} ${instanceId} in ${regionId} (${pricingModelValue}): ${finalPrice}`);
+    console.log(`[Pricing] Successfully fetched price for ${provider} ${instanceId} in ${regionId} (${pricingModelValue}): ${finalPrice}`);
     return {
       provider, machineFamilyId: instanceId, machineFamilyName, price: finalPrice,
       regionId, regionName, pricingModelLabel: modelDetails.label, pricingModelValue: modelDetails.value,
@@ -490,4 +483,3 @@ export const fetchPricingData = async (
     };
   }
 };
-
