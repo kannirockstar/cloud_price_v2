@@ -12,67 +12,67 @@ const storage = new storage_1.Storage();
 const configuredBucketName = process.env.GCS_BUCKET_NAME;
 /**
  * Parses GCE CSV content to find the hourly price for a specific instance and pricing model.
- * GCE CSV is expected to have unit prices for vCPU and RAM based on commitment for each machine family.
- * For a given MachineFamily (e.g., 'e2-standard-2'), the 'OnDemand_VCPU_per_Hour' column
- * is assumed to contain the total vCPU cost for that specific machine type, and
- * 'OnDemand_RAM_per_GiB_Hour' contains the total RAM cost for that type.
- * This function sums these two components to get the total hourly price.
- * @param csvContent The full string content of the CSV file.
- * @param targetMachineFamily The machine family to find (e.g., 'e2-standard-2' - after stripping 'gcp-' prefix).
- * @param targetPricingModel The GCE pricing model value (e.g., 'on-demand', 'gcp-1yr-cud').
- * @param filePath For logging purposes.
- * @returns The total hourly price as a number, or null if not found or error.
+ * Returns an object with totalPrice, vcpuComponentPrice, and ramComponentPrice, or null.
+ * vcpuCount and ramGibiBytes are for the specific instance type being requested.
  */
-function parseGceCsvForPrice(csvContent, targetMachineFamily, // e.g., "e2-standard-2" (after stripping 'gcp-')
-targetPricingModel, // e.g., "on-demand", "gcp-1yr-cud"
+function parseGceCsvForPrice(csvContent, targetMachineFamilyInCsv, // e.g., "e2-standard-2", "c2-standard-4"
+targetPricingModel, vcpuCountForInstance, // Actual vCPU count of the instance
+ramGibiBytesForInstance, // Actual RAM (GiB) of the instance
 filePath) {
     const rows = csvContent.split('\n');
     if (rows.length < 2) {
         console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} has no data rows or is malformed.`);
         return null;
     }
-    // Use exact case for GCE header matching as per CSV structure
     const headerRow = rows[0].trim().split(',');
-    const gceMachineFamilyCol = 'MachineFamily'; // Exact case from example
+    // Exact case-sensitive GCE column names for PER-UNIT costs
+    const gceMachineFamilyCol = 'MachineFamily';
     const gceOnDemandVcpuCol = 'OnDemand_VCPU_per_Hour';
     const gceOnDemandRamCol = 'OnDemand_RAM_per_GiB_Hour';
     const gce1yrCudVcpuCol = 'CUD_1yr_VCPU_per_Hour';
     const gce1yrCudRamCol = 'CUD_1yr_RAM_per_GiB_Hour';
     const gce3yrCudVcpuCol = 'CUD_3yr_VCPU_per_Hour';
     const gce3yrCudRamCol = 'CUD_3yr_RAM_per_GiB_Hour';
+    const gceFlex1yrCudVcpuCol = 'CUD_Flex_1yr_VCPU_per_Hour';
+    const gceFlex1yrCudRamCol = 'CUD_Flex_1yr_RAM_per_GiB_Hour';
+    const gceFlex3yrCudVcpuCol = 'CUD_Flex_3yr_VCPU_per_Hour';
+    const gceFlex3yrCudRamCol = 'CUD_Flex_3yr_RAM_per_GiB_Hour';
     const machineFamilyColIndex = headerRow.indexOf(gceMachineFamilyCol);
-    const onDemandVcpuColIndex = headerRow.indexOf(gceOnDemandVcpuCol);
-    const onDemandRamColIndex = headerRow.indexOf(gceOnDemandRamCol);
-    const yr1CudVcpuColIndex = headerRow.indexOf(gce1yrCudVcpuCol);
-    const yr1CudRamColIndex = headerRow.indexOf(gce1yrCudRamCol);
-    const yr3CudVcpuColIndex = headerRow.indexOf(gce3yrCudVcpuCol);
-    const yr3CudRamColIndex = headerRow.indexOf(gce3yrCudRamCol);
-    console.log(`[GCF/parseGceCsvForPrice] Header indices for GCE CSV ${filePath}: MachineFamily=${machineFamilyColIndex}, OnDemandVCPU=${onDemandVcpuColIndex}, OnDemandRAM=${onDemandRamColIndex}, 1yrCUDVCPU=${yr1CudVcpuColIndex}, 1yrCUDRAM=${yr1CudRamColIndex}, 3yrCUDVCPU=${yr3CudVcpuColIndex}, 3yrCUDRAM=${yr3CudRamColIndex}`);
-    let vcpuPriceColIndex = -1;
-    let ramPriceColIndex = -1;
+    let perUnitVcpuPriceColIndex = -1;
+    let perUnitRamPriceColIndex = -1;
     const lowerTargetPricingModel = targetPricingModel.toLowerCase();
     if (lowerTargetPricingModel === 'on-demand') {
-        vcpuPriceColIndex = onDemandVcpuColIndex;
-        ramPriceColIndex = onDemandRamColIndex;
+        perUnitVcpuPriceColIndex = headerRow.indexOf(gceOnDemandVcpuCol);
+        perUnitRamPriceColIndex = headerRow.indexOf(gceOnDemandRamCol);
     }
     else if (lowerTargetPricingModel === 'gcp-1yr-cud') {
-        vcpuPriceColIndex = yr1CudVcpuColIndex;
-        ramPriceColIndex = yr1CudRamColIndex;
+        perUnitVcpuPriceColIndex = headerRow.indexOf(gce1yrCudVcpuCol);
+        perUnitRamPriceColIndex = headerRow.indexOf(gce1yrCudRamCol);
     }
     else if (lowerTargetPricingModel === 'gcp-3yr-cud') {
-        vcpuPriceColIndex = yr3CudVcpuColIndex;
-        ramPriceColIndex = yr3CudRamColIndex;
+        perUnitVcpuPriceColIndex = headerRow.indexOf(gce3yrCudVcpuCol);
+        perUnitRamPriceColIndex = headerRow.indexOf(gce3yrCudRamCol);
+    }
+    else if (lowerTargetPricingModel === 'gcp-1yr-flex-cud') {
+        perUnitVcpuPriceColIndex = headerRow.indexOf(gceFlex1yrCudVcpuCol);
+        perUnitRamPriceColIndex = headerRow.indexOf(gceFlex1yrCudRamCol);
+    }
+    else if (lowerTargetPricingModel === 'gcp-3yr-flex-cud') {
+        perUnitVcpuPriceColIndex = headerRow.indexOf(gceFlex3yrCudVcpuCol);
+        perUnitRamPriceColIndex = headerRow.indexOf(gceFlex3yrCudRamCol);
     }
     else {
         console.warn(`[GCF/parseGceCsvForPrice] Unsupported GCE pricing model '${targetPricingModel}' for CSV parsing in ${filePath}.`);
         return null;
     }
+    console.log(`[GCF/parseGceCsvForPrice] Header indices for GCE CSV ${filePath} (case-sensitive): MachineFamily=${headerRow.indexOf(gceMachineFamilyCol)}, OnDemandVCPU=${headerRow.indexOf(gceOnDemandVcpuCol)}, OnDemandRAM=${headerRow.indexOf(gceOnDemandRamCol)}, 1yrCUDVCPU=${headerRow.indexOf(gce1yrCudVcpuCol)}, 1yrCUDRAM=${headerRow.indexOf(gce1yrCudRamCol)}, 3yrCUDVCPU=${headerRow.indexOf(gce3yrCudVcpuCol)}, 3yrCUDRAM=${headerRow.indexOf(gce3yrCudRamCol)}, Flex1yrVCPU=${headerRow.indexOf(gceFlex1yrCudVcpuCol)}, Flex1yrRAM=${headerRow.indexOf(gceFlex1yrCudRamCol)}, Flex3yrVCPU=${headerRow.indexOf(gceFlex3yrCudVcpuCol)}, Flex3yrRAM=${headerRow.indexOf(gceFlex3yrCudRamCol)}`);
+    console.log(`[GCF/parseGceCsvForPrice] For model '${targetPricingModel}', using VCPU Col Idx: ${perUnitVcpuPriceColIndex}, RAM Col Idx: ${perUnitRamPriceColIndex}. Requested Instance: vCPUs=${vcpuCountForInstance}, RAM=${ramGibiBytesForInstance}GiB.`);
     if (machineFamilyColIndex === -1) {
-        console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} is missing '${gceMachineFamilyCol}' column. Headers: ${headerRow.join(', ')}`);
+        console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} is missing '${gceMachineFamilyCol}' column (case-sensitive). Headers: ${headerRow.join(', ')}`);
         return null;
     }
-    if (vcpuPriceColIndex === -1 || ramPriceColIndex === -1) {
-        console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} is missing required price columns for GCE model '${targetPricingModel}'. VCPU Col Idx: ${vcpuPriceColIndex}, RAM Col Idx: ${ramPriceColIndex}. Headers: ${headerRow.join(', ')}`);
+    if (perUnitVcpuPriceColIndex === -1 || perUnitRamPriceColIndex === -1) {
+        console.error(`[GCF/parseGceCsvForPrice] CSV file ${filePath} is missing required per-unit price columns for GCE model '${targetPricingModel}' (case-sensitive). VCPU Col Idx: ${perUnitVcpuPriceColIndex}, RAM Col Idx: ${perUnitRamPriceColIndex}. Headers: ${headerRow.join(', ')}`);
         return null;
     }
     for (let i = 1; i < rows.length; i++) {
@@ -80,35 +80,37 @@ filePath) {
         if (!row)
             continue;
         const rowValues = row.split(',');
-        if (rowValues.length <= Math.max(machineFamilyColIndex, vcpuPriceColIndex, ramPriceColIndex)) {
+        if (rowValues.length <= Math.max(machineFamilyColIndex, perUnitVcpuPriceColIndex, perUnitRamPriceColIndex)) {
             if (i < 5) {
-                console.warn(`[GCF/parseGceCsvForPrice] Row ${i + 1} in ${filePath} has too few columns (${rowValues.length}) to access all required GCE indices. Max index needed: ${Math.max(machineFamilyColIndex, vcpuPriceColIndex, ramPriceColIndex)}. Row content: '${row}'`);
+                console.warn(`[GCF/parseGceCsvForPrice] Row ${i + 1} in ${filePath} has too few columns (${rowValues.length}) to access all required GCE indices. Max index needed: ${Math.max(machineFamilyColIndex, perUnitVcpuPriceColIndex, perUnitRamPriceColIndex)}. Row content: '${row}'`);
             }
             continue;
         }
         const csvMachineFamily = rowValues[machineFamilyColIndex]?.trim();
-        if (csvMachineFamily === targetMachineFamily) {
-            console.log(`[GCF/parseGceCsvForPrice] Found matching GCE machine family '${targetMachineFamily}' in ${filePath} at row ${i + 1}.`);
-            const vcpuPriceStr = rowValues[vcpuPriceColIndex]?.trim();
-            const ramPriceStr = rowValues[ramPriceColIndex]?.trim();
-            console.log(`[GCF/parseGceCsvForPrice] Raw price strings for ${targetMachineFamily} (${targetPricingModel}): VCPU='${vcpuPriceStr}', RAM='${ramPriceStr}'`);
-            const vcpuPrice = parseFloat(vcpuPriceStr);
-            const ramPrice = parseFloat(ramPriceStr);
-            if (isNaN(vcpuPrice))
-                console.warn(`[GCF/parseGceCsvForPrice] VCPU price string '${vcpuPriceStr}' for ${targetMachineFamily} resulted in NaN.`);
-            if (isNaN(ramPrice))
-                console.warn(`[GCF/parseGceCsvForPrice] RAM price string '${ramPriceStr}' for ${targetMachineFamily} resulted in NaN.`);
-            if (!isNaN(vcpuPrice) && !isNaN(ramPrice)) {
-                const totalPrice = vcpuPrice + ramPrice;
-                console.log(`[GCF/parseGceCsvForPrice] Calculated price for ${targetMachineFamily} (${targetPricingModel}): ${totalPrice}`);
-                return totalPrice;
+        if (csvMachineFamily === targetMachineFamilyInCsv) {
+            console.log(`[GCF/parseGceCsvForPrice] Found matching GCE machine family in CSV '${targetMachineFamilyInCsv}' in ${filePath} at row ${i + 1}.`);
+            const perUnitVcpuPriceStr = rowValues[perUnitVcpuPriceColIndex]?.trim();
+            const perUnitRamPriceStr = rowValues[perUnitRamPriceColIndex]?.trim();
+            console.log(`[GCF/parseGceCsvForPrice] Raw PER-UNIT price strings for ${targetMachineFamilyInCsv} (${targetPricingModel}): VCPU='${perUnitVcpuPriceStr}', RAM='${perUnitRamPriceStr}' from columns at VCPU_idx=${perUnitVcpuPriceColIndex}, RAM_idx=${perUnitRamPriceColIndex}`);
+            const perUnitVcpuCost = parseFloat(perUnitVcpuPriceStr);
+            const perUnitRamCost = parseFloat(perUnitRamPriceStr);
+            if (isNaN(perUnitVcpuCost))
+                console.warn(`[GCF/parseGceCsvForPrice] PER-UNIT VCPU price string '${perUnitVcpuPriceStr}' for ${targetMachineFamilyInCsv} resulted in NaN.`);
+            if (isNaN(perUnitRamCost))
+                console.warn(`[GCF/parseGceCsvForPrice] PER-UNIT RAM price string '${perUnitRamPriceStr}' for ${targetMachineFamilyInCsv} resulted in NaN.`);
+            if (!isNaN(perUnitVcpuCost) && !isNaN(perUnitRamCost)) {
+                const vcpuComponentPrice = perUnitVcpuCost * vcpuCountForInstance;
+                const ramComponentPrice = perUnitRamCost * ramGibiBytesForInstance;
+                const totalPrice = vcpuComponentPrice + ramComponentPrice;
+                console.log(`[GCF/parseGceCsvForPrice] Calculated prices for instance (using ${vcpuCountForInstance} vCPU, ${ramGibiBytesForInstance} GiB RAM) based on CSV family ${targetMachineFamilyInCsv} (${targetPricingModel}): Total Hourly=${totalPrice}, Total vCPU Component=${vcpuComponentPrice}, Total RAM Component=${ramComponentPrice}`);
+                return { totalPrice, vcpuComponentPrice, ramComponentPrice };
             }
             else {
-                console.warn(`[GCF/parseGceCsvForPrice] Matched GCE row for ${targetMachineFamily} in ${filePath} but price components invalid. VCPU: '${vcpuPriceStr}', RAM: '${ramPriceStr}'.`);
+                console.warn(`[GCF/parseGceCsvForPrice] Matched GCE row for ${targetMachineFamilyInCsv} in ${filePath} but per-unit price components invalid. VCPU: '${perUnitVcpuPriceStr}', RAM: '${perUnitRamPriceStr}'.`);
             }
         }
     }
-    console.warn(`[GCF/parseGceCsvForPrice] Price not found in GCE CSV ${filePath} for machine family ${targetMachineFamily} with pricing model ${targetPricingModel}.`);
+    console.warn(`[GCF/parseGceCsvForPrice] Price not found in GCE CSV ${filePath} for machine family ${targetMachineFamilyInCsv} with pricing model ${targetPricingModel}.`);
     return null;
 }
 function parseAzureCsvForPrice(csvContent, targetInstanceId, targetPricingModel, filePath) {
@@ -117,8 +119,8 @@ function parseAzureCsvForPrice(csvContent, targetInstanceId, targetPricingModel,
         console.error(`[GCF/parseAzureCsvForPrice] CSV file ${filePath} has no data rows or is malformed.`);
         return null;
     }
-    const headerRow = rows[0].trim().split(','); // Keep case for Azure, assuming headers are exact
-    const azureInstanceNameCol = 'ArmSkuName'; // Assuming exact case, adjust if different
+    const headerRow = rows[0].trim().split(','); // Case-sensitive for Azure
+    const azureInstanceNameCol = 'ArmSkuName';
     const azureReservationTermCol = 'ReservationTerm';
     const azureMeterNameCol = 'MeterName';
     const azurePriceCol = 'UnitPrice';
@@ -127,10 +129,10 @@ function parseAzureCsvForPrice(csvContent, targetInstanceId, targetPricingModel,
     const meterNameColIndex = headerRow.indexOf(azureMeterNameCol);
     const priceColIndex = headerRow.indexOf(azurePriceCol);
     if (instanceNameColIndex === -1 || reservationTermColIndex === -1 || meterNameColIndex === -1 || priceColIndex === -1) {
-        console.error(`[GCF/parseAzureCsvForPrice] CSV file ${filePath} missing Azure columns. Expected (case-sensitive): '${azureInstanceNameCol}', '${azureReservationTermCol}', '${azureMeterNameCol}', '${azurePriceCol}'. Found Headers: ${headerRow.join(', ')}.`);
+        console.error(`[GCF/parseAzureCsvForPrice] CSV file ${filePath} missing Azure columns (case-sensitive). Expected: '${azureInstanceNameCol}', '${azureReservationTermCol}', '${azureMeterNameCol}', '${azurePriceCol}'. Found Headers: ${headerRow.join(', ')}.`);
         return null;
     }
-    console.log(`[GCF/parseAzureCsvForPrice] Searching for Azure instance '${targetInstanceId}' model '${targetPricingModel}' in CSV ${filePath}.`);
+    console.log(`[GCF/parseAzureCsvForPrice] Searching for Azure instance '${targetInstanceId}' model '${targetPricingModel}' in CSV ${filePath}. Headers: ${headerRow.join(', ')}`);
     const lowerTargetPricingModel = targetPricingModel.toLowerCase();
     for (let i = 1; i < rows.length; i++) {
         const row = rows[i]?.trim();
@@ -177,12 +179,7 @@ function parseAzureCsvForPrice(csvContent, targetInstanceId, targetPricingModel,
     console.warn(`[GCF/parseAzureCsvForPrice] Azure Price not found in CSV ${filePath} for instance ${targetInstanceId} model ${targetPricingModel}.`);
     return null;
 }
-function parseGenericCsvForPrice(csvContent, targetInstanceIdToLookup, originalInstanceId, // For logging
-targetPricingModelContext, // For matching if modelColumnName is provided, or for logging/error context
-instanceColumnName, // Exact case as expected in CSV
-modelColumnName, // Exact case if used, otherwise empty string
-priceColumnName, // Exact case as expected in CSV
-filePath) {
+function parseGenericCsvForPrice(csvContent, targetInstanceIdToLookup, originalInstanceId, targetPricingModelContext, instanceColumnName, modelColumnName, priceColumnName, filePath) {
     const rows = csvContent.split('\n');
     if (rows.length < 2) {
         console.error(`[GCF/parseGenericCsvForPrice] CSV file ${filePath} has no data rows or is malformed.`);
@@ -190,7 +187,6 @@ filePath) {
     }
     const headerRow = rows[0].trim().split(','); // Keep original case for header matching
     console.log(`[GCF/parseGenericCsvForPrice] CSV Headers (case-sensitive): ${headerRow.join(', ')}`);
-    // Use exact case for column name lookup
     const instanceNameColIndex = headerRow.indexOf(instanceColumnName);
     const hourlyPriceColIndex = headerRow.indexOf(priceColumnName);
     let pricingModelColIndex = -1;
@@ -210,7 +206,6 @@ filePath) {
         console.error(`[GCF/parseGenericCsvForPrice] CSV ${filePath} missing required columns (case-sensitive check): ${missingColsMessages.join('; ')}. Actual headers found: ${headerRow.join(', ')}.`);
         return null;
     }
-    // Normalize the targetPricingModelContext only for value comparison if a modelColumnName is actually used.
     const normalizedTargetPricingModelForValueComparison = modelColumnName ? targetPricingModelContext.toLowerCase() : '';
     if (modelColumnName) {
         console.log(`[GCF/parseGenericCsvForPrice] Normalized target pricing model for value comparison (if model column '${modelColumnName}' used): '${normalizedTargetPricingModelForValueComparison}'`);
@@ -237,7 +232,7 @@ filePath) {
         if (csvInstanceId === targetInstanceIdToLookup) {
             let modelConditionMet = false;
             if (!modelColumnName) {
-                modelConditionMet = true; // No model column to check, just use the price from priceColumnName
+                modelConditionMet = true;
                 console.log(`[GCF/parseGenericCsvForPrice] Instance '${csvInstanceId}' matched. No model column ('${modelColumnName}') was specified for filtering. Using price from column '${priceColumnName}'.`);
             }
             else {
@@ -269,9 +264,11 @@ filePath) {
 }
 const getPricingData = async (req, res) => {
     console.log(`[GCF/getPricingData] Function invoked. Configured GCS_BUCKET_NAME: ${configuredBucketName || 'NOT SET'}`);
+    // Declare these at a higher scope to be accessible in the final catch block
     let awsPriceColumnForLookup = '';
     let awsModelColumnForLookup = '';
-    let awsInstanceColumn = '';
+    let awsInstanceColumn = ''; // This is 'InstanceType' for AWS
+    let filePath = ''; // Also used in catch block
     if (req.method === 'OPTIONS') {
         corsHandler(req, res, () => { res.status(204).send(''); });
         return;
@@ -282,10 +279,10 @@ const getPricingData = async (req, res) => {
             res.status(500).send({ error: 'Server config error: Bucket name not set.' });
             return;
         }
-        const { provider, regionId, instanceId, pricingModelValue } = req.query;
-        console.log(`[GCF/getPricingData] Parsed query params - Provider: '${provider}', RegionId: '${regionId}', InstanceId: '${instanceId}', PricingModelValue: '${pricingModelValue}'`);
+        const { provider, regionId, instanceId, pricingModelValue, vcpuCount, ramGibiBytes } = req.query;
+        console.log(`[GCF/getPricingData] Parsed query params - Provider: '${provider}', RegionId: '${regionId}', InstanceId: '${instanceId}', PricingModelValue: '${pricingModelValue}', VCPUCount: '${vcpuCount}', RamGibiBytes: '${ramGibiBytes}'`);
         if (!provider || !regionId || !instanceId || !pricingModelValue) {
-            console.warn('[GCF/getPricingData] Missing one or more required query parameters.');
+            console.warn('[GCF/getPricingData] Missing one or more required query parameters (provider, regionId, instanceId, pricingModelValue).');
             res.status(400).send({ error: 'Missing required query parameters (provider, regionId, instanceId, pricingModelValue)' });
             return;
         }
@@ -297,15 +294,21 @@ const getPricingData = async (req, res) => {
         let gcsFolder = '';
         let csvFileName = '';
         let foundPrice = null;
-        let filePath = '';
+        let gcePriceDetails = null;
+        let awsInstanceIdToLookup = instanceId;
         try {
             if (provider === 'Google Cloud') {
+                const numVcpuCount = vcpuCount ? parseFloat(vcpuCount) : undefined;
+                const numRamGibiBytes = ramGibiBytes ? parseFloat(ramGibiBytes) : undefined;
+                if (numVcpuCount === undefined || isNaN(numVcpuCount) || numRamGibiBytes === undefined || isNaN(numRamGibiBytes)) {
+                    console.warn(`[GCF/getPricingData/GCE] Missing or invalid vcpuCount ('${vcpuCount}') or ramGibiBytes ('${ramGibiBytes}') for GCE price calculation.`);
+                    res.status(400).send({ error: 'Missing or invalid vcpuCount or ramGibiBytes for GCE pricing.' });
+                    return;
+                }
                 gcsFolder = 'GCE';
                 csvFileName = `gce_all_models_${regionId}.csv`;
-                console.log(`[GCF/getPricingData/GCE] Constructed csvFileName: '${csvFileName}' from regionId: '${regionId}'`);
                 filePath = `${gcsFolder}/${csvFileName}`;
-                console.log(`[GCF/getPricingData/GCE] Constructed filePath: '${filePath}'`);
-                const gceMachineFamilyToLookup = instanceId.replace(/^gcp-/, '');
+                const gceMachineFamilyToLookupInCsv = instanceId.replace(/^gcp-/, '');
                 console.log(`[GCF/getPricingData] Attempting GCE CSV download: gs://${configuredBucketName}/${filePath}`);
                 const gceFile = storage.bucket(configuredBucketName).file(filePath);
                 const [exists] = await gceFile.exists();
@@ -316,14 +319,15 @@ const getPricingData = async (req, res) => {
                 }
                 const [contentBuffer] = await gceFile.download();
                 const contentString = contentBuffer.toString();
-                foundPrice = parseGceCsvForPrice(contentString, gceMachineFamilyToLookup, pricingModelValue, filePath);
+                gcePriceDetails = parseGceCsvForPrice(contentString, gceMachineFamilyToLookupInCsv, pricingModelValue, numVcpuCount, numRamGibiBytes, filePath);
+                if (gcePriceDetails) {
+                    foundPrice = gcePriceDetails.totalPrice;
+                }
             }
             else if (provider === 'Azure') {
                 gcsFolder = 'Azure';
                 csvFileName = `${regionId}_prices.csv`;
-                console.log(`[GCF/getPricingData/Azure] Constructed csvFileName: '${csvFileName}' from regionId: '${regionId}'`);
                 filePath = `${gcsFolder}/${csvFileName}`;
-                console.log(`[GCF/getPricingData/Azure] Constructed filePath: '${filePath}'`);
                 console.log(`[GCF/getPricingData] Attempting Azure CSV download: gs://${configuredBucketName}/${filePath}`);
                 const azureFile = storage.bucket(configuredBucketName).file(filePath);
                 const [exists] = await azureFile.exists();
@@ -339,10 +343,9 @@ const getPricingData = async (req, res) => {
             else if (provider === 'AWS') {
                 gcsFolder = 'EC2';
                 csvFileName = `aws_ec2_all_pricing_${regionId}.csv`;
-                console.log(`[GCF/getPricingData/AWS] Constructed csvFileName: '${csvFileName}' from regionId: '${regionId}'`);
                 filePath = `${gcsFolder}/${csvFileName}`;
-                console.log(`[GCF/getPricingData/AWS] Constructed filePath: '${filePath}'`);
-                let awsInstanceIdToLookup = instanceId;
+                awsInstanceColumn = 'InstanceType'; // Case-sensitive for AWS
+                awsModelColumnForLookup = ''; // Default to no model column for direct price column lookup
                 if (instanceId.startsWith('aws-')) {
                     let strippedId = instanceId.substring(4);
                     const firstHyphenIndex = strippedId.indexOf('-');
@@ -353,9 +356,10 @@ const getPricingData = async (req, res) => {
                         awsInstanceIdToLookup = strippedId;
                     }
                 }
-                console.log(`[GCF/getPricingData/AWS] Original instanceId from client: '${instanceId}', Transformed lookup instanceId for CSV: '${awsInstanceIdToLookup}'`);
-                awsInstanceColumn = 'InstanceType'; // Corrected: Use 'InstanceType' for AWS
-                awsModelColumnForLookup = ''; // Default to no model column, direct price column lookup
+                else {
+                    awsInstanceIdToLookup = instanceId;
+                }
+                console.log(`[GCF/getPricingData/AWS] Original instanceId: '${instanceId}', Transformed lookup: '${awsInstanceIdToLookup}' using column '${awsInstanceColumn}'`);
                 const lowerPricingModelValue = pricingModelValue.toLowerCase();
                 if (lowerPricingModelValue === 'on-demand') {
                     awsPriceColumnForLookup = 'OnDemand_Hourly';
@@ -382,10 +386,10 @@ const getPricingData = async (req, res) => {
                     awsPriceColumnForLookup = 'RI_3yr_AllUpfront';
                 }
                 else {
-                    console.warn(`[GCF/getPricingData/AWS] Unknown AWS pricing model value '${pricingModelValue}'. Attempting fallback to 'OnDemand_Hourly'.`);
-                    awsPriceColumnForLookup = 'OnDemand_Hourly'; // Fallback
+                    console.warn(`[GCF/getPricingData/AWS] Unknown AWS pricing model '${pricingModelValue}'. Attempting fallback to 'OnDemand_Hourly'.`);
+                    awsPriceColumnForLookup = 'OnDemand_Hourly';
                 }
-                console.log(`[GCF/getPricingData/AWS] For model '${pricingModelValue}': Instance column='${awsInstanceColumn}', Price column='${awsPriceColumnForLookup}', Model filter column='${awsModelColumnForLookup || "N/A (direct price column)"}'.`);
+                console.log(`[GCF/getPricingData/AWS] For model '${pricingModelValue}': Price column='${awsPriceColumnForLookup}'.`);
                 console.log(`[GCF/getPricingData] Attempting AWS CSV download: gs://${configuredBucketName}/${filePath}`);
                 const awsFile = storage.bucket(configuredBucketName).file(filePath);
                 const [exists] = await awsFile.exists();
@@ -404,32 +408,30 @@ const getPricingData = async (req, res) => {
                 return;
             }
             if (foundPrice !== null) {
-                res.status(200).send({ hourlyPrice: foundPrice });
+                if (provider === 'Google Cloud' && gcePriceDetails) {
+                    res.status(200).send({
+                        hourlyPrice: gcePriceDetails.totalPrice,
+                        vcpuHourlyPrice: gcePriceDetails.vcpuComponentPrice, // Return total vCPU cost for this instance
+                        ramHourlyPrice: gcePriceDetails.ramComponentPrice // Return total RAM cost for this instance
+                    });
+                }
+                else {
+                    res.status(200).send({ hourlyPrice: foundPrice });
+                }
             }
             else {
-                let specificErrorMsg = `Price not found for instance ${instanceId} (lookup ID: ${provider === 'AWS' ? instanceId.replace(/^aws-/, '').replace('-', '.') : instanceId}) with pricing model ${pricingModelValue} in CSV file ${filePath}.`;
+                let specificErrorMsg = `Price not found for instance ${instanceId} (lookup ID for AWS: ${provider === 'AWS' ? awsInstanceIdToLookup : instanceId}) with pricing model ${pricingModelValue} in CSV file ${filePath}.`;
                 if (provider === 'Google Cloud') {
-                    specificErrorMsg += ` Check GCE CSV content for matching '${instanceId.replace(/^gcp-/, '')}' (MachineFamily) and ensure model '${pricingModelValue}' maps to existing VCPU/RAM price columns (case-sensitive: e.g., OnDemand_VCPU_per_Hour).`;
+                    const gceMachineFamilyForError = instanceId.replace(/^gcp-/, '');
+                    specificErrorMsg += ` Check GCE CSV content for matching '${gceMachineFamilyForError}' (MachineFamily) and ensure model '${pricingModelValue}' maps to existing VCPU/RAM price columns (case-sensitive: e.g., OnDemand_VCPU_per_Hour, CUD_Flex_1yr_VCPU_per_Hour). Also ensure vcpuCount ('${vcpuCount}') and ramGibiBytes ('${ramGibiBytes}') were provided.`;
                 }
                 else if (provider === 'Azure') {
                     specificErrorMsg += ` Check Azure CSV content for instance '${instanceId}', appropriate 'ReservationTerm' and 'MeterName' for model '${pricingModelValue}'. Column headers are case-sensitive (e.g., ArmSkuName).`;
                 }
                 else if (provider === 'AWS') {
-                    let lookupIdForError = instanceId;
-                    if (instanceId.startsWith('aws-')) {
-                        let stripped = instanceId.substring(4);
-                        const firstHyphenIdx = stripped.indexOf('-');
-                        if (firstHyphenIdx !== -1) {
-                            lookupIdForError = stripped.substring(0, firstHyphenIdx) + '.' + stripped.substring(firstHyphenIdx + 1);
-                        }
-                        else {
-                            lookupIdForError = stripped;
-                        }
-                    }
                     const priceColForErrorMsg = awsPriceColumnForLookup || "N/A";
-                    const modelColForErrorMsg = awsModelColumnForLookup || "N/A (direct price column lookup)";
                     const instanceColForErrorMsg = awsInstanceColumn || "N/A";
-                    specificErrorMsg += ` Check AWS CSV content for instance (lookup ID '${lookupIdForError}') using instance column '${instanceColForErrorMsg}'. Price was looked for in column '${priceColForErrorMsg}'. Model matching (if applicable) was against column '${modelColForErrorMsg}'. Column headers are case-sensitive.`;
+                    specificErrorMsg += ` Check AWS CSV content for instance (lookup ID '${awsInstanceIdToLookup}') using instance column '${instanceColForErrorMsg}'. Price was looked for in column '${priceColForErrorMsg}'. Column headers are case-sensitive.`;
                 }
                 console.warn(`[GCF/getPricingData] FINAL - ${specificErrorMsg}`);
                 res.status(404).send({ error: specificErrorMsg });

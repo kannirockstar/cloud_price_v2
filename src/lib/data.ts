@@ -415,8 +415,13 @@ export const fetchPricingData = async (
       if (specs.ramInGB !== null) {
         params.append('ramGibiBytes', specs.ramInGB.toString());
       }
+      if (instanceDetails.familyGroup) { // Send the base family group for CSV lookup
+        params.append('gceBaseFamilyForCsv', instanceDetails.familyGroup.toLowerCase());
+      } else {
+        console.warn(`[PricingData/GCE] Missing familyGroup for instance ${instanceId}. CSV lookup might be inaccurate.`);
+      }
     } else {
-      console.warn(`[PricingData] Could not find instance details for GCE instance ${instanceId} to send vCPU/RAM to GCF.`);
+      console.warn(`[PricingData/GCE] Could not find instance details for GCE instance ${instanceId} to send vCPU/RAM/BaseFamily to GCF.`);
     }
   }
 
@@ -474,3 +479,6 @@ export const fetchPricingData = async (
     error: gcfErrorDetails,
   };
 };
+
+
+  
