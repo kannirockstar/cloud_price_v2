@@ -326,14 +326,21 @@ const getPricingData = async (req, res) => {
             }
             else if (provider === 'AWS') {
                 gcsFolder = 'EC2';
-                csvFileName = `ec2_pricing_${regionId}.csv`;
+                csvFileName = `aws_ec2_all_pricing_${regionId}.csv`;
                 console.log(`[GCF/getPricingData/AWS] Constructed csvFileName: '${csvFileName}' from regionId: '${regionId}'`);
                 filePath = `${gcsFolder}/${csvFileName}`;
                 console.log(`[GCF/getPricingData/AWS] Constructed filePath: '${filePath}'`);
                 let awsInstanceIdToLookup = instanceId;
                 if (instanceId.startsWith('aws-')) {
-                    let strippedId = instanceId.substring(4);
-                    awsInstanceIdToLookup = strippedId.replace('-', '.'); // e.g., "c5-12xlarge" -> "c5.12xlarge"
+                    let strippedId = instanceId.substring(4); // e.g., "c5-12xlarge" from "aws-c5-12xlarge"
+                    // Replace the first hyphen with a dot
+                    const parts = strippedId.split('-');
+                    if (parts.length > 1) {
+                        awsInstanceIdToLookup = parts[0] + '.' + parts.slice(1).join('-'); // e.g., "c5.12xlarge"
+                    }
+                    else {
+                        awsInstanceIdToLookup = strippedId; // No hyphen to replace, use as is
+                    }
                 }
                 console.log(`[GCF/getPricingData/AWS] Original instanceId: '${instanceId}', Lookup instanceId: '${awsInstanceIdToLookup}'`);
                 let awsInstanceColumn = 'instance_name';
@@ -376,7 +383,9 @@ const getPricingData = async (req, res) => {
                 else { // AWS
                     let lookupIdForError = instanceId;
                     if (instanceId.startsWith('aws-')) {
-                        lookupIdForError = instanceId.substring(4).replace('-', '.');
+                        let stripped = instanceId.substring(4);
+                        const parts = stripped.split('-');
+                        lookupIdForError = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('-') : stripped;
                     }
                     const modelColNameToDisplay = (pricingModelValue.toLowerCase() === 'on-demand') ? "N/A (used OnDemand_Hourly)" : 'pricing_model';
                     const priceColNameToDisplay = (pricingModelValue.toLowerCase() === 'on-demand') ? 'OnDemand_Hourly' : 'hourly_price';
@@ -388,7 +397,7 @@ const getPricingData = async (req, res) => {
         }
         catch (error) {
             const pathForError = filePath || (gcsFolder && csvFileName ? `${gcsFolder}/${csvFileName}` : 'N/A (filePath not set before error)');
-            console.error(`[GCF/getPricingData] CRITICAL - Unhandled error during CSV processing. Attempted filePath (if set): 'gs://${configuredBucketName}/${pathForError}'. Error:`, error);
+            console.error(`[GCF/getPricingData] CRITICAL - Unhandled error during CSV processing. Attempted filePath (if set): 'gs://${configuredBucketName}/${pathForError}'. Query params: P='${provider}', R='${regionId}', I='${instanceId}', PM='${pricingModelValue}'. Error:`, error);
             let errorMessage = `Failed to process pricing data CSV from GCS. Check GCF logs for specific error details. Underlying error: ${error.message || 'Unknown error'}`;
             let statusCode = 500;
             if (error.code === 403 || (error.errors && error.errors.some((e) => e.reason === 'forbidden'))) {
