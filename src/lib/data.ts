@@ -1,5 +1,7 @@
 
 import type { Region, MachineFamily, CloudProvider, SelectOption, PriceData, PricingModel } from './types';
+import { parseMachineSpecs as parseMachineSpecsUtil } from './types'; // Assuming parseMachineSpecs is moved or duplicated here
+
 
 export let googleCloudRegions: Region[] = [];
 export let azureRegions: Region[] = [];
@@ -49,7 +51,14 @@ export async function loadProviderMetadata(): Promise<void> {
       googleCloudRegions = (gcpRegionsData as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
       azureRegions = (azRegionsData as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
       awsRegions = (awsRegionsData as Region[] || []).sort((a, b) => a.name.localeCompare(b.name));
-      machineFamilies = (mfData as MachineFamily[] || []);
+      machineFamilies = (mfData as MachineFamily[] || []).map(mf => ({
+        ...mf,
+        cpuArchitecture: mf.cpuArchitecture || 'N/A',
+        cpuClockSpeed: mf.cpuClockSpeed || 'N/A',
+        isSapCertified: mf.isSapCertified || false,
+        sapsRating: mf.sapsRating || null,
+      }));
+
 
       metadataLoaded = true;
       console.log("[Metadata] Core metadata loaded from local /public directory successfully.");
@@ -116,30 +125,9 @@ export const getRegionsForProvider = (provider: CloudProvider, geo?: string): Re
   return allRegions.sort((a,b) => a.name.localeCompare(b.name));
 };
 
-export const parseMachineSpecs = (machine: MachineFamily): { cpuCount: number | null, ramInGB: number | null } => {
-  let cpuCount: number | null = null;
-  if (machine.cpu) {
-    if (machine.cpu.toLowerCase().includes('shared')) {
-      cpuCount = 0.5;
-    } else {
-      const cpuMatch = machine.cpu.match(/(\d+(\.\d+)?)/);
-      if (cpuMatch && cpuMatch[1]) {
-        cpuCount = parseFloat(cpuMatch[1]);
-      }
-    }
-  }
+// Using parseMachineSpecsUtil from types.ts, assuming it's exported or defined locally
+export const parseMachineSpecs = parseMachineSpecsUtil;
 
-  let ramInGB: number | null = null;
-  if (machine.ram) {
-    const ramMatch = machine.ram.match(/([\d.]+)\s*(GB|TB)/i);
-    if (ramMatch && ramMatch[1] && ramMatch[2]) {
-      const value = parseFloat(ramMatch[1]);
-      const unit = ramMatch[2].toUpperCase();
-      ramInGB = unit === 'TB' ? value * 1024 : value;
-    }
-  }
-  return { cpuCount, ramInGB };
-};
 
 export const getMachineFamilyGroups = (
   provider: CloudProvider, minCpu?: number, userMinRamGB?: number,
@@ -168,7 +156,7 @@ export const getMachineFamilyGroups = (
         const upperBoundCpu = filterSapCertified && applyTolerance ? minCpu * 1.15 : Infinity;
         cpuMatch = specs.cpuCount >= lowerBoundCpu && specs.cpuCount <= upperBoundCpu;
       } else if (minCpu !== undefined && specs.cpuCount === null) {
-         cpuMatch = minCpu <= 0;
+         cpuMatch = minCpu <= 0; // Match if looking for 0 or less CPUs and spec is null/shared
       }
 
       let ramMatch = true;
@@ -177,7 +165,7 @@ export const getMachineFamilyGroups = (
         const upperBoundRam = filterSapCertified && applyTolerance ? userMinRamGB * 1.15 : Infinity;
         ramMatch = specs.ramInGB >= lowerBoundRam && specs.ramInGB <= upperBoundRam;
       } else if (userMinRamGB !== undefined && specs.ramInGB === null) {
-        ramMatch = userMinRamGB <=0;
+        ramMatch = userMinRamGB <=0; // Match if looking for 0 or less RAM and spec is null
       }
       return cpuMatch && ramMatch;
     });
@@ -263,8 +251,8 @@ export const getMachineInstancesForFamily = (
 export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
   // Spot
-  { value: 'azure-spot', label: 'Azure Spot', providers: ['Azure'], discountFactor: 1.0 }, // Actual discount varies
-  { value: 'spot-hourly', label: 'AWS Spot', providers: ['AWS'], discountFactor: 1.0 }, // Actual discount varies for AWS Spot
+  { value: 'azure-spot', label: 'Azure Spot', providers: ['Azure'], discountFactor: 1.0 },
+  { value: 'spot-hourly', label: 'AWS Spot', providers: ['AWS'], discountFactor: 1.0 },
   // Google Cloud CUDs
   { value: 'gcp-1yr-cud', label: 'GCP CUD (1-Year)', providers: ['Google Cloud'], discountFactor: 0.70 },
   { value: 'gcp-3yr-cud', label: 'GCP CUD (3-Year)', providers: ['Google Cloud'], discountFactor: 0.50 },
@@ -277,7 +265,7 @@ export const pricingModelOptions: PricingModel[] = [
   { value: 'azure-3yr-ri-all-upfront', label: 'Azure RI (3-Yr, All Upfront)', providers: ['Azure'], discountFactor: 0.45 },
   { value: 'azure-1yr-sp', label: 'Azure Savings Plan (1-Year)', providers: ['Azure'], discountFactor: 0.70 },
   { value: 'azure-3yr-sp', label: 'Azure Savings Plan (3-Year)', providers: ['Azure'], discountFactor: 0.50 },
-  // AWS RIs (based on CSV columns)
+  // AWS RIs
   { value: 'aws-ri-1yr-noupfront', label: 'AWS RI (1-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.70 },
   { value: 'aws-ri-3yr-noupfront', label: 'AWS RI (3-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.50 },
   { value: 'aws-ri-1yr-partialupfront', label: 'AWS RI (1-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.65 },
@@ -299,9 +287,9 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
         if (provider === 'AWS' && b.value === 'spot-hourly') return 1;
 
         const getPriority = (value: string) => {
-          if (value.includes('-ri-')) return 1; 
-          if (value.includes('-cud')) return 2; 
-          if (value.includes('-sp')) return 3;  
+          if (value.includes('-ri-')) return 1;
+          if (value.includes('-cud')) return 2;
+          if (value.includes('-sp')) return 3;
           return 4;
         };
 
@@ -320,7 +308,7 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
         if (upfrontA !== -1 && upfrontB !== -1 && upfrontA !== upfrontB) {
             return upfrontA - upfrontB;
         }
-        if (upfrontA !== -1 && upfrontB === -1) return -1; 
+        if (upfrontA !== -1 && upfrontB === -1) return -1;
         if (upfrontA === -1 && upfrontB !== -1) return 1;
 
         return a.label.localeCompare(b.label);
@@ -389,8 +377,8 @@ export const fetchPricingData = async (
   }
 
   const modelDetails = getPricingModelDetails(pricingModelValue) ||
-                     pricingModelOptions.find(m => m.value === 'on-demand') || 
-                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; 
+                     pricingModelOptions.find(m => m.value === 'on-demand') ||
+                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 };
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
@@ -416,11 +404,28 @@ export const fetchPricingData = async (
     instanceId: instanceId,
     pricingModelValue: pricingModelValue,
   });
+
+  if (provider === 'Google Cloud') {
+    const instanceDetails = machineFamilies.find(mf => mf.id === instanceId);
+    if (instanceDetails) {
+      const specs = parseMachineSpecs(instanceDetails);
+      if (specs.cpuCount !== null) {
+        params.append('vcpuCount', specs.cpuCount.toString());
+      }
+      if (specs.ramInGB !== null) {
+        params.append('ramGibiBytes', specs.ramInGB.toString());
+      }
+    } else {
+      console.warn(`[PricingData] Could not find instance details for GCE instance ${instanceId} to send vCPU/RAM to GCF.`);
+    }
+  }
+
+
   const fullUrl = `${cloudFunctionUrl}?${params.toString()}`;
 
   try {
     console.log(`[PricingData] Fetching from Cloud Function: ${fullUrl}`);
-    const response = await fetch(fullUrl, { cache: 'no-store' }); 
+    const response = await fetch(fullUrl, { cache: 'no-store' });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from Cloud Function" }));
@@ -430,9 +435,9 @@ export const fetchPricingData = async (
       const pricingDataObject: { hourlyPrice?: number; vcpuHourlyPrice?: number; ramHourlyPrice?: number; [key: string]: any } = await response.json();
       if (pricingDataObject && typeof pricingDataObject.hourlyPrice === 'number') {
         price = parseFloat(Math.max(0.000001, pricingDataObject.hourlyPrice).toFixed(6));
-        vcpuHourlyPrice = pricingDataObject.vcpuHourlyPrice; // Will be undefined if not present
-        ramHourlyPrice = pricingDataObject.ramHourlyPrice;   // Will be undefined if not present
-        console.log(`[PricingData] Successfully fetched and parsed price via Cloud Function for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): Total=${price}, VCPU=${vcpuHourlyPrice}, RAM=${ramHourlyPrice}`);
+        vcpuHourlyPrice = pricingDataObject.vcpuHourlyPrice !== undefined ? parseFloat(pricingDataObject.vcpuHourlyPrice.toFixed(6)) : undefined;
+        ramHourlyPrice = pricingDataObject.ramHourlyPrice !== undefined ? parseFloat(pricingDataObject.ramHourlyPrice.toFixed(6)) : undefined;
+        console.log(`[PricingData] Successfully fetched and parsed price via Cloud Function for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): Total=${price}, VCPU Component=${vcpuHourlyPrice}, RAM Component=${ramHourlyPrice}`);
       } else {
         const warnMsg = `[PricingData] Hourly price not found or not a number in Cloud Function response for ${provider} ${instanceId}. Received data: ${JSON.stringify(pricingDataObject)}`;
         console.warn(warnMsg);
@@ -459,7 +464,7 @@ export const fetchPricingData = async (
     provider,
     machineFamilyId: instanceId,
     machineFamilyName,
-    price, 
+    price,
     vcpuHourlyPrice,
     ramHourlyPrice,
     regionId,
