@@ -80,6 +80,9 @@ filePath) {
             continue;
         const rowValues = row.split(',');
         if (rowValues.length <= Math.max(machineFamilyColIndex, vcpuPriceColIndex, ramPriceColIndex)) {
+            if (i < 5) { // Log only for first few rows to avoid excessive logging
+                console.warn(`[GCF/parseGceCsvForPrice] Row ${i + 1} in ${filePath} has too few columns (${rowValues.length}) to access all required GCE indices. Max index needed: ${Math.max(machineFamilyColIndex, vcpuPriceColIndex, ramPriceColIndex)}. Row content: '${row}'`);
+            }
             continue;
         }
         const csvMachineFamily = rowValues[machineFamilyColIndex]?.trim();
@@ -134,6 +137,9 @@ function parseAzureCsvForPrice(csvContent, targetInstanceId, targetPricingModel,
             continue;
         const rowValues = row.split(',');
         if (rowValues.length <= Math.max(instanceNameColIndex, reservationTermColIndex, meterNameColIndex, priceColIndex)) {
+            if (i < 5) { // Log only for first few rows
+                console.warn(`[GCF/parseAzureCsvForPrice] Row ${i + 1} in ${filePath} has too few columns (${rowValues.length}) to access all required Azure indices. Max index needed: ${Math.max(instanceNameColIndex, reservationTermColIndex, meterNameColIndex, priceColIndex)}. Row content: '${row}'`);
+            }
             continue;
         }
         const csvInstanceId = rowValues[instanceNameColIndex]?.trim();
@@ -170,8 +176,8 @@ function parseAzureCsvForPrice(csvContent, targetInstanceId, targetPricingModel,
     console.warn(`[GCF/parseAzureCsvForPrice] Azure Price not found in CSV ${filePath} for instance ${targetInstanceId} model ${targetPricingModel}.`);
     return null;
 }
-function parseGenericCsvForPrice(csvContent, targetInstanceIdToLookup, // This is the ID used for matching in CSV (e.g. 'c5.12xlarge')
-originalInstanceId, // This is the ID from the request (e.g. 'aws-c5.12xlarge')
+function parseGenericCsvForPrice(csvContent, targetInstanceIdToLookup, // This is the ID used for matching in CSV (e.g., 'c5.12xlarge')
+originalInstanceId, // This is the ID from the request (e.g., 'aws-c5.12xlarge')
 targetPricingModel, instanceColumnName, modelColumnName, priceColumnName, filePath) {
     const rows = csvContent.split('\n');
     if (rows.length < 2) {
@@ -210,7 +216,7 @@ targetPricingModel, instanceColumnName, modelColumnName, priceColumnName, filePa
         const csvInstanceId = rowValues[instanceNameColIndex]?.trim() || '';
         const csvPricingModel = rowValues[pricingModelColIndex]?.trim().toLowerCase() || '';
         const csvHourlyPriceStr = rowValues[hourlyPriceColIndex]?.trim();
-        if (i < 5 || targetInstanceIdToLookup === csvInstanceId) {
+        if (i < 5 || targetInstanceIdToLookup === csvInstanceId) { // Log more verbosely for initial rows or if the instance ID matches for debugging
             console.log(`[GCF/parseGenericCsvForPrice] Row ${i + 1} Data: Instance='${csvInstanceId}', Model(raw)='${rowValues[pricingModelColIndex]}', Model(norm)='${csvPricingModel}', Price(raw)='${csvHourlyPriceStr}'`);
         }
         if (csvInstanceId === targetInstanceIdToLookup && csvPricingModel === normalizedTargetPricingModel) {
@@ -307,7 +313,12 @@ const getPricingData = async (req, res) => {
                 console.log(`[GCF/getPricingData/AWS] Constructed csvFileName: '${csvFileName}' from regionId: '${regionId}'`);
                 filePath = `${gcsFolder}/${csvFileName}`;
                 console.log(`[GCF/getPricingData/AWS] Constructed filePath: '${filePath}'`);
-                const awsInstanceIdToLookup = instanceId.startsWith('aws-') ? instanceId.substring(4) : instanceId;
+                let awsInstanceIdToLookup = instanceId;
+                if (instanceId.startsWith('aws-')) {
+                    let strippedId = instanceId.substring(4); // Remove "aws-"
+                    // Replace the first hyphen with a dot, common in EC2 family names like c5-large -> c5.large
+                    awsInstanceIdToLookup = strippedId.replace('-', '.');
+                }
                 console.log(`[GCF/getPricingData/AWS] Original instanceId: '${instanceId}', Lookup instanceId: '${awsInstanceIdToLookup}'`);
                 console.log(`[GCF/getPricingData] Attempting AWS CSV download: gs://${configuredBucketName}/${filePath}`);
                 const awsFile = storage.bucket(configuredBucketName).file(filePath);
@@ -339,8 +350,11 @@ const getPricingData = async (req, res) => {
                     specificErrorMsg += ` Check Azure CSV content for instance '${instanceId}', appropriate 'reservationTerm' and 'meterName' for model '${pricingModelValue}'.`;
                 }
                 else { // AWS
-                    const awsLookupId = instanceId.startsWith('aws-') ? instanceId.substring(4) : instanceId;
-                    specificErrorMsg += ` Check AWS CSV content for instance (lookup ID '${awsLookupId}') and model '${pricingModelValue}'. Ensure columns ('${awsInstanceColumn}', '${awsModelColumn}', '${awsPriceColumn}') match headers.`;
+                    let lookupIdForError = instanceId;
+                    if (instanceId.startsWith('aws-')) {
+                        lookupIdForError = instanceId.substring(4).replace('-', '.');
+                    }
+                    specificErrorMsg += ` Check AWS CSV content for instance (lookup ID '${lookupIdForError}') and model '${pricingModelValue}'. Ensure columns ('${awsInstanceColumn}', '${awsModelColumn}', '${awsPriceColumn}') match headers.`;
                 }
                 console.warn(`[GCF/getPricingData] FINAL - ${specificErrorMsg}`);
                 res.status(404).send({ error: specificErrorMsg });
@@ -348,15 +362,16 @@ const getPricingData = async (req, res) => {
         }
         catch (error) {
             // Log filePath here to see its value if an error occurs *after* it might have been set
-            console.error(`[GCF/getPricingData] CRITICAL - Unhandled error during CSV processing. Attempted filePath (if set): 'gs://${configuredBucketName}/${filePath}'. Error:`, error);
+            const pathForError = filePath || (gcsFolder && csvFileName ? `${gcsFolder}/${csvFileName}` : 'N/A');
+            console.error(`[GCF/getPricingData] CRITICAL - Unhandled error during CSV processing. Attempted filePath (if set): 'gs://${configuredBucketName}/${pathForError}'. Error:`, error);
             let errorMessage = `Failed to process pricing data CSV from GCS. Check GCF logs for specific error details. Underlying error: ${error.message || 'Unknown error'}`;
             let statusCode = 500;
             if (error.code === 403 || (error.errors && error.errors.some((e) => e.reason === 'forbidden'))) {
-                errorMessage = `Permission denied for GCF service account when accessing GCS bucket '${configuredBucketName}' for file '${filePath}'. Ensure 'Storage Object Viewer' role.`;
+                errorMessage = `Permission denied for GCF service account when accessing GCS bucket '${configuredBucketName}' for file '${pathForError}'. Ensure 'Storage Object Viewer' role.`;
                 statusCode = 403;
             }
             else if (error.code === 404 || (error.message && error.message.toLowerCase().includes('no such object'))) {
-                errorMessage = `CSV File not found in GCS: gs://${configuredBucketName}/${filePath}. Verify path and name.`;
+                errorMessage = `CSV File not found in GCS: gs://${configuredBucketName}/${pathForError}. Verify path and name.`;
                 statusCode = 404;
             }
             else if (error.message?.includes("CSV file is missing required columns") || error.message?.includes("has no data rows or is malformed")) {
