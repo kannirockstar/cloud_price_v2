@@ -264,6 +264,7 @@ export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
   // Spot
   { value: 'azure-spot', label: 'Azure Spot', providers: ['Azure'], discountFactor: 1.0 }, // Actual discount varies
+  { value: 'spot-hourly', label: 'AWS Spot', providers: ['AWS'], discountFactor: 1.0 }, // Actual discount varies for AWS Spot
   // Google Cloud CUDs
   { value: 'gcp-1yr-cud', label: 'GCP CUD (1-Year)', providers: ['Google Cloud'], discountFactor: 0.70 },
   { value: 'gcp-3yr-cud', label: 'GCP CUD (3-Year)', providers: ['Google Cloud'], discountFactor: 0.50 },
@@ -276,7 +277,7 @@ export const pricingModelOptions: PricingModel[] = [
   { value: 'azure-3yr-ri-all-upfront', label: 'Azure RI (3-Yr, All Upfront)', providers: ['Azure'], discountFactor: 0.45 },
   { value: 'azure-1yr-sp', label: 'Azure Savings Plan (1-Year)', providers: ['Azure'], discountFactor: 0.70 },
   { value: 'azure-3yr-sp', label: 'Azure Savings Plan (3-Year)', providers: ['Azure'], discountFactor: 0.50 },
-  // AWS RIs (New based on CSV columns)
+  // AWS RIs (based on CSV columns)
   { value: 'aws-ri-1yr-noupfront', label: 'AWS RI (1-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.70 },
   { value: 'aws-ri-3yr-noupfront', label: 'AWS RI (3-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.50 },
   { value: 'aws-ri-1yr-partialupfront', label: 'AWS RI (1-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.65 },
@@ -290,32 +291,28 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
     .filter(model => model.providers.includes(provider))
     .map(model => ({ value: model.value, label: model.label }))
     .sort((a, b) => {
-        // Prioritize "On-Demand" and "Spot"
         if (a.value === 'on-demand') return -1;
         if (b.value === 'on-demand') return 1;
-        if (provider === 'Azure') {
-            if (a.value === 'azure-spot') return -1;
-            if (b.value === 'azure-spot') return 1;
-        }
+        if (provider === 'Azure' && a.value === 'azure-spot') return -1;
+        if (provider === 'Azure' && b.value === 'azure-spot') return 1;
+        if (provider === 'AWS' && a.value === 'spot-hourly') return -1;
+        if (provider === 'AWS' && b.value === 'spot-hourly') return 1;
 
-        // General sorting logic for other types
         const getPriority = (value: string) => {
-          if (value.includes('-ri-')) return 1; // All RIs
-          if (value.includes('-cud')) return 2; // All CUDs
-          if (value.includes('-sp')) return 3;  // All SPs
-          return 4; // Fallback
+          if (value.includes('-ri-')) return 1; 
+          if (value.includes('-cud')) return 2; 
+          if (value.includes('-sp')) return 3;  
+          return 4;
         };
 
         const priorityA = getPriority(a.value);
         const priorityB = getPriority(b.value);
         if (priorityA !== priorityB) return priorityA - priorityB;
 
-        // Secondary sort: 1-year before 3-year
         const yearA = a.value.includes('1yr') ? 1 : (a.value.includes('3yr') ? 3 : 0);
         const yearB = b.value.includes('1yr') ? 1 : (b.value.includes('3yr') ? 3 : 0);
         if (yearA !== yearB) return yearA - yearB;
 
-        // Tertiary sort: No Upfront < Partial Upfront < All Upfront
         const upfrontOrder = ['noupfront', 'partialupfront', 'allupfront'];
         const upfrontA = upfrontOrder.findIndex(u => a.value.includes(u));
         const upfrontB = upfrontOrder.findIndex(u => b.value.includes(u));
@@ -323,10 +320,10 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
         if (upfrontA !== -1 && upfrontB !== -1 && upfrontA !== upfrontB) {
             return upfrontA - upfrontB;
         }
-        if (upfrontA !== -1 && upfrontB === -1) return -1; // Models with upfront status listed before those without
+        if (upfrontA !== -1 && upfrontB === -1) return -1; 
         if (upfrontA === -1 && upfrontB !== -1) return 1;
 
-        return a.label.localeCompare(b.label); // Alphabetical fallback
+        return a.label.localeCompare(b.label);
       });
 };
 
@@ -392,11 +389,13 @@ export const fetchPricingData = async (
   }
 
   const modelDetails = getPricingModelDetails(pricingModelValue) ||
-                     pricingModelOptions.find(m => m.value === 'on-demand') || // Fallback to on-demand if model not found
-                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; // Ultimate fallback
+                     pricingModelOptions.find(m => m.value === 'on-demand') || 
+                     { label: pricingModelValue, value: pricingModelValue, providers: [], discountFactor: 1.0 }; 
   const machineFamilyName = getInstanceFullDescription(provider, instanceId);
   const regionName = getRegionNameById(provider, regionId);
   let price: number | null = null;
+  let vcpuHourlyPrice: number | undefined = undefined;
+  let ramHourlyPrice: number | undefined = undefined;
   let gcfErrorDetails: string | undefined = undefined;
 
   const cloudFunctionUrl = process.env.NEXT_PUBLIC_PRICING_FUNCTION_URL;
@@ -421,17 +420,19 @@ export const fetchPricingData = async (
 
   try {
     console.log(`[PricingData] Fetching from Cloud Function: ${fullUrl}`);
-    const response = await fetch(fullUrl, { cache: 'no-store' }); // 'no-store' to always get fresh data
+    const response = await fetch(fullUrl, { cache: 'no-store' }); 
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from Cloud Function" }));
       console.error(`[PricingData] Cloud Function Error for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${response.status} ${response.statusText}. Details: ${errorData?.error || 'N/A'}`);
       gcfErrorDetails = errorData?.error || `Cloud Function returned ${response.status} ${response.statusText || ''}`.trim();
     } else {
-      const pricingDataObject: { hourlyPrice?: number; [key: string]: any } = await response.json();
+      const pricingDataObject: { hourlyPrice?: number; vcpuHourlyPrice?: number; ramHourlyPrice?: number; [key: string]: any } = await response.json();
       if (pricingDataObject && typeof pricingDataObject.hourlyPrice === 'number') {
         price = parseFloat(Math.max(0.000001, pricingDataObject.hourlyPrice).toFixed(6));
-        console.log(`[PricingData] Successfully fetched and parsed price via Cloud Function for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): ${price}`);
+        vcpuHourlyPrice = pricingDataObject.vcpuHourlyPrice; // Will be undefined if not present
+        ramHourlyPrice = pricingDataObject.ramHourlyPrice;   // Will be undefined if not present
+        console.log(`[PricingData] Successfully fetched and parsed price via Cloud Function for ${provider} ${instanceId} in ${regionId} (model: ${pricingModelValue}): Total=${price}, VCPU=${vcpuHourlyPrice}, RAM=${ramHourlyPrice}`);
       } else {
         const warnMsg = `[PricingData] Hourly price not found or not a number in Cloud Function response for ${provider} ${instanceId}. Received data: ${JSON.stringify(pricingDataObject)}`;
         console.warn(warnMsg);
@@ -458,11 +459,13 @@ export const fetchPricingData = async (
     provider,
     machineFamilyId: instanceId,
     machineFamilyName,
-    price, // This will be null if there was an error or price wasn't found
+    price, 
+    vcpuHourlyPrice,
+    ramHourlyPrice,
     regionId,
     regionName,
     pricingModelLabel: modelDetails.label,
     pricingModelValue: modelDetails.value,
-    error: gcfErrorDetails, // This will contain the error message if something went wrong
+    error: gcfErrorDetails,
   };
 };

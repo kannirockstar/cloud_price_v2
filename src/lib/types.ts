@@ -10,7 +10,7 @@ export interface PricingModel {
   value: string;
   label: string;
   providers: CloudProvider[];
-  discountFactor: number;
+  discountFactor: number; // Retained for potential client-side estimations if GCF fails, but GCF is primary
 }
 
 export interface MachineFamily {
@@ -25,6 +25,8 @@ export interface MachineFamily {
   ram: string;
   isSapCertified?: boolean;
   sapsRating?: number;
+  gpu?: string; // Optional field for GPU details
+  accelerator?: string; // Optional field for other accelerators
 }
 
 export interface Region {
@@ -37,26 +39,15 @@ export interface PriceData {
   provider: CloudProvider;
   machineFamilyId: string;
   machineFamilyName: string;
-  price: number | null;
+  price: number | null; // This is the total hourly price
+  vcpuHourlyPrice?: number; // Optional: component cost from GCF (primarily for GCE)
+  ramHourlyPrice?: number;  // Optional: component cost from GCF (primarily for GCE)
   regionId: string;
   regionName: string;
   pricingModelLabel: string;
   pricingModelValue: string;
-  error?: string; // Added to carry error messages
+  error?: string;
 }
-
-// ComparisonRequest is no longer needed for dynamic individual fetching
-// export interface ComparisonRequest {
-//   googleRegionId: string;
-//   azureRegionId: string;
-//   awsRegionId: string;
-//   googleMachineFamilyId: string;
-//   azureMachineFamilyId: string;
-//   awsMachineFamilyId: string;
-//   googlePricingModel: string;
-//   azurePricingModel: string;
-//   awsPricingModel: string;
-// }
 
 export interface HistoricalPricePoint {
   date: string;
@@ -72,4 +63,3 @@ export interface CpuDetails {
   architecture: string;
   clockSpeed?: string;
 }
-

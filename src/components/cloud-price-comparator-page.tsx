@@ -523,14 +523,13 @@ Please check the browser's developer console for more specific network error det
       return <div className={`${priceDisplayWrapperClass} flex items-center`}><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading price...</div>;
     }
 
-    if (priceData && priceData.error) { // Check for explicit error from GCF
+    if (priceData && priceData.error) { 
       return <div className={`${priceDisplayWrapperClass} text-sm text-destructive`}>Error: {priceData.error}</div>;
     }
 
     if (!priceData || priceData.price === null) {
       return <div className={`${priceDisplayWrapperClass} text-sm text-muted-foreground`}>Price not available</div>;
     }
-
 
     const monthlyPrice = priceData.price * HOURS_IN_MONTH;
     let differenceText = '';
@@ -570,7 +569,11 @@ Please check the browser's developer console for more specific network error det
           </p>
         )}
          <p className="text-xs text-muted-foreground">
-          (Hourly: ${priceData.price.toFixed(6)}, Model: {priceData.pricingModelLabel})
+          {priceData.vcpuHourlyPrice !== undefined && priceData.ramHourlyPrice !== undefined ? (
+            `(VCPU: $${priceData.vcpuHourlyPrice.toFixed(6)}/hr + RAM: $${priceData.ramHourlyPrice.toFixed(6)}/hr = Total Hourly: $${priceData.price.toFixed(6)}, Model: ${priceData.pricingModelLabel})`
+          ) : (
+            `(Hourly: $${priceData.price.toFixed(6)}, Model: ${priceData.pricingModelLabel})`
+          )}
         </p>
       </div>
     );
@@ -807,4 +810,3 @@ Please check the browser's developer console for more specific network error det
     </div>
   );
 }
-
