@@ -262,29 +262,27 @@ export const getMachineInstancesForFamily = (
 
 export const pricingModelOptions: PricingModel[] = [
   { value: 'on-demand', label: 'On-Demand', providers: ['Google Cloud', 'Azure', 'AWS'], discountFactor: 1.0 },
-  { value: 'azure-spot', label: 'Azure Spot', providers: ['Azure'], discountFactor: 1.0 }, // Actual discount varies widely for spot
-  { value: 'gcp-1yr-cud', label: '1-Year CUD', providers: ['Google Cloud'], discountFactor: 0.70 },
-  { value: 'gcp-3yr-cud', label: '3-Year CUD', providers: ['Google Cloud'], discountFactor: 0.50 },
-  { value: 'gcp-1yr-flex-cud', label: 'Flexible CUD (1-Year)', providers: ['Google Cloud'], discountFactor: 0.80 },
-  { value: 'gcp-3yr-flex-cud', label: 'Flexible CUD (3-Year)', providers: ['Google Cloud'], discountFactor: 0.60 },
-  { value: 'azure-1yr-ri-no-upfront', label: '1-Year RI (No Upfront)', providers: ['Azure'], discountFactor: 0.72 }, // Placeholder, actual discount based on CSV
-  { value: 'azure-3yr-ri-no-upfront', label: '3-Year RI (No Upfront)', providers: ['Azure'], discountFactor: 0.53 }, // Placeholder
-  { value: 'azure-1yr-ri-all-upfront', label: '1-Year RI (All Upfront)', providers: ['Azure'], discountFactor: 0.65 }, // Placeholder
-  { value: 'azure-3yr-ri-all-upfront', label: '3-Year RI (All Upfront)', providers: ['Azure'], discountFactor: 0.45 }, // Placeholder
-  { value: 'azure-1yr-sp', label: 'Savings Plan (1-Year)', providers: ['Azure'], discountFactor: 0.70 }, // Placeholder
-  { value: 'azure-3yr-sp', label: 'Savings Plan (3-Year)', providers: ['Azure'], discountFactor: 0.50 }, // Placeholder
-  { value: 'aws-1yr-ec2instance-sp-no-upfront', label: 'EC2 Instance SP (1-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.75 },
-  { value: 'aws-3yr-ec2instance-sp-no-upfront', label: 'EC2 Instance SP (3-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.55 },
-  { value: 'aws-1yr-ec2instance-sp-partial-upfront', label: 'EC2 Instance SP (1-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.72 },
-  { value: 'aws-3yr-ec2instance-sp-partial-upfront', label: 'EC2 Instance SP (3-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.52 },
-  { value: 'aws-1yr-ec2instance-sp-all-upfront', label: 'EC2 Instance SP (1-Yr, All Upfront)', providers: ['AWS'], discountFactor: 0.70 },
-  { value: 'aws-3yr-ec2instance-sp-all-upfront', label: 'EC2 Instance SP (3-Yr, All Upfront)', providers: ['AWS'], discountFactor: 0.50 },
-  { value: 'aws-1yr-compute-sp-no-upfront', label: 'Compute SP (1-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.82 },
-  { value: 'aws-3yr-compute-sp-no-upfront', label: 'Compute SP (3-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.60 },
-  { value: 'aws-1yr-compute-sp-partial-upfront', label: 'Compute SP (1-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.80 },
-  { value: 'aws-3yr-compute-sp-partial-upfront', label: 'Compute SP (3-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.58 },
-  { value: 'aws-1yr-compute-sp-all-upfront', label: 'Compute SP (1-Yr, All Upfront)', providers: ['AWS'], discountFactor: 0.78 },
-  { value: 'aws-3yr-compute-sp-all-upfront', label: 'Compute SP (3-Yr, All Upfront)', providers: ['AWS'], discountFactor: 0.56 },
+  // Spot
+  { value: 'azure-spot', label: 'Azure Spot', providers: ['Azure'], discountFactor: 1.0 }, // Actual discount varies
+  // Google Cloud CUDs
+  { value: 'gcp-1yr-cud', label: 'GCP CUD (1-Year)', providers: ['Google Cloud'], discountFactor: 0.70 },
+  { value: 'gcp-3yr-cud', label: 'GCP CUD (3-Year)', providers: ['Google Cloud'], discountFactor: 0.50 },
+  { value: 'gcp-1yr-flex-cud', label: 'GCP Flexible CUD (1-Year)', providers: ['Google Cloud'], discountFactor: 0.80 },
+  { value: 'gcp-3yr-flex-cud', label: 'GCP Flexible CUD (3-Year)', providers: ['Google Cloud'], discountFactor: 0.60 },
+  // Azure RIs & SPs
+  { value: 'azure-1yr-ri-no-upfront', label: 'Azure RI (1-Yr, No Upfront)', providers: ['Azure'], discountFactor: 0.72 },
+  { value: 'azure-3yr-ri-no-upfront', label: 'Azure RI (3-Yr, No Upfront)', providers: ['Azure'], discountFactor: 0.53 },
+  { value: 'azure-1yr-ri-all-upfront', label: 'Azure RI (1-Yr, All Upfront)', providers: ['Azure'], discountFactor: 0.65 },
+  { value: 'azure-3yr-ri-all-upfront', label: 'Azure RI (3-Yr, All Upfront)', providers: ['Azure'], discountFactor: 0.45 },
+  { value: 'azure-1yr-sp', label: 'Azure Savings Plan (1-Year)', providers: ['Azure'], discountFactor: 0.70 },
+  { value: 'azure-3yr-sp', label: 'Azure Savings Plan (3-Year)', providers: ['Azure'], discountFactor: 0.50 },
+  // AWS RIs (New based on CSV columns)
+  { value: 'aws-ri-1yr-noupfront', label: 'AWS RI (1-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.70 },
+  { value: 'aws-ri-3yr-noupfront', label: 'AWS RI (3-Yr, No Upfront)', providers: ['AWS'], discountFactor: 0.50 },
+  { value: 'aws-ri-1yr-partialupfront', label: 'AWS RI (1-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.65 },
+  { value: 'aws-ri-3yr-partialupfront', label: 'AWS RI (3-Yr, Partial Upfront)', providers: ['AWS'], discountFactor: 0.45 },
+  { value: 'aws-ri-1yr-allupfront', label: 'AWS RI (1-Yr, All Upfront)', providers: ['AWS'], discountFactor: 0.60 },
+  { value: 'aws-ri-3yr-allupfront', label: 'AWS RI (3-Yr, All Upfront)', providers: ['AWS'], discountFactor: 0.40 },
 ];
 
 export const getPricingModelsForProvider = (provider: CloudProvider): SelectOption[] => {
@@ -292,44 +290,43 @@ export const getPricingModelsForProvider = (provider: CloudProvider): SelectOpti
     .filter(model => model.providers.includes(provider))
     .map(model => ({ value: model.value, label: model.label }))
     .sort((a, b) => {
+        // Prioritize "On-Demand" and "Spot"
         if (a.value === 'on-demand') return -1;
         if (b.value === 'on-demand') return 1;
-        if (a.value === 'azure-spot' && provider === 'Azure') return -1; // Spot just after on-demand for Azure
-        if (b.value === 'azure-spot' && provider === 'Azure') return 1;
+        if (provider === 'Azure') {
+            if (a.value === 'azure-spot') return -1;
+            if (b.value === 'azure-spot') return 1;
+        }
 
-        const getPriority = (label: string, value: string) => {
-          if (provider === 'AWS') {
-              if (value.includes('ec2instance-sp')) return 1;
-              if (value.includes('compute-sp')) return 2;
-              return 5;
-          }
-          // Priorities for GCP and Azure
-          if (value.includes('ri-')) return 1; // Azure RIs
-          if (value.includes('-sp')) return 2; // Azure SPs (general, not EC2 specific)
-          if (value.includes('flex-cud')) return 4; // GCP Flex CUDs
-          if (value.includes('-cud')) return 3; // GCP CUDs
-          return 5;
+        // General sorting logic for other types
+        const getPriority = (value: string) => {
+          if (value.includes('-ri-')) return 1; // All RIs
+          if (value.includes('-cud')) return 2; // All CUDs
+          if (value.includes('-sp')) return 3;  // All SPs
+          return 4; // Fallback
         };
-        const priorityA = getPriority(a.label, a.value);
-        const priorityB = getPriority(b.label, b.value);
+
+        const priorityA = getPriority(a.value);
+        const priorityB = getPriority(b.value);
         if (priorityA !== priorityB) return priorityA - priorityB;
 
-        const getYear = (val: string) => (val.includes('1yr') ? 1 : (val.includes('3yr') ? 3 : 0));
-        const yearA = getYear(a.value);
-        const yearB = getYear(b.value);
+        // Secondary sort: 1-year before 3-year
+        const yearA = a.value.includes('1yr') ? 1 : (a.value.includes('3yr') ? 3 : 0);
+        const yearB = b.value.includes('1yr') ? 1 : (b.value.includes('3yr') ? 3 : 0);
         if (yearA !== yearB) return yearA - yearB;
-        
-        const getUpfrontOrder = (val: string) => {
-            if (val.includes('noupfront')) return 1;
-            if (val.includes('partialupfront')) return 2;
-            if (val.includes('allupfront')) return 3;
-            return 0; // For models without upfront specified (like spot, on-demand)
-        };
-        const upfrontA = getUpfrontOrder(a.value);
-        const upfrontB = getUpfrontOrder(b.value);
-        if (upfrontA !== upfrontB) return upfrontA - upfrontB;
 
-        return a.label.localeCompare(b.label);
+        // Tertiary sort: No Upfront < Partial Upfront < All Upfront
+        const upfrontOrder = ['noupfront', 'partialupfront', 'allupfront'];
+        const upfrontA = upfrontOrder.findIndex(u => a.value.includes(u));
+        const upfrontB = upfrontOrder.findIndex(u => b.value.includes(u));
+
+        if (upfrontA !== -1 && upfrontB !== -1 && upfrontA !== upfrontB) {
+            return upfrontA - upfrontB;
+        }
+        if (upfrontA !== -1 && upfrontB === -1) return -1; // Models with upfront status listed before those without
+        if (upfrontA === -1 && upfrontB !== -1) return 1;
+
+        return a.label.localeCompare(b.label); // Alphabetical fallback
       });
 };
 
@@ -469,5 +466,3 @@ export const fetchPricingData = async (
     error: gcfErrorDetails, // This will contain the error message if something went wrong
   };
 };
-
-    
