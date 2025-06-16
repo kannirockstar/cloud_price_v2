@@ -178,7 +178,7 @@ function parseAzureCsvForPrice(csvContent, targetInstanceId, targetPricingModel,
     return null;
 }
 function parseGenericCsvForPrice(csvContent, targetInstanceIdToLookup, originalInstanceId, // For logging
-targetPricingModel, // For matching if modelColumnName is provided, or for logging
+targetPricingModelContext, // For matching if modelColumnName is provided, or for logging/error context
 instanceColumnName, // Exact case as expected in CSV
 modelColumnName, // Exact case if used, otherwise empty string
 priceColumnName, // Exact case as expected in CSV
@@ -189,7 +189,7 @@ filePath) {
         return null;
     }
     const headerRow = rows[0].trim().split(','); // Keep original case for header matching
-    console.log(`[GCF/parseGenericCsvForPrice] CSV Headers (raw): ${headerRow.join(', ')}`);
+    console.log(`[GCF/parseGenericCsvForPrice] CSV Headers (case-sensitive): ${headerRow.join(', ')}`);
     // Use exact case for column name lookup
     const instanceNameColIndex = headerRow.indexOf(instanceColumnName);
     const hourlyPriceColIndex = headerRow.indexOf(priceColumnName);
@@ -197,8 +197,8 @@ filePath) {
     if (modelColumnName) {
         pricingModelColIndex = headerRow.indexOf(modelColumnName);
     }
-    console.log(`[GCF/parseGenericCsvForPrice] Searching for instance (lookup ID) '${targetInstanceIdToLookup}' (original ID: '${originalInstanceId}') model context '${targetPricingModel}' in generic CSV ${filePath}.`);
-    console.log(`[GCF/parseGenericCsvForPrice] Column indices: InstanceName=${instanceNameColIndex} (using '${instanceColumnName}'), PricingModel=${modelColumnName ? pricingModelColIndex : "N/A (direct price column)"} (using '${modelColumnName || "N/A"}'), HourlyPrice=${hourlyPriceColIndex} (using '${priceColumnName}').`);
+    console.log(`[GCF/parseGenericCsvForPrice] Searching for instance (lookup ID) '${targetInstanceIdToLookup}' (original ID: '${originalInstanceId}') with pricing model context '${targetPricingModelContext}' in generic CSV ${filePath}.`);
+    console.log(`[GCF/parseGenericCsvForPrice] Column indices (case-sensitive lookup): InstanceName=${instanceNameColIndex} (using '${instanceColumnName}'), PricingModel=${modelColumnName ? pricingModelColIndex : "N/A (direct price column)"} (using '${modelColumnName || "N/A"}'), HourlyPrice=${hourlyPriceColIndex} (using '${priceColumnName}').`);
     const missingColsMessages = [];
     if (instanceNameColIndex === -1)
         missingColsMessages.push(`Instance column '${instanceColumnName}'`);
@@ -210,8 +210,11 @@ filePath) {
         console.error(`[GCF/parseGenericCsvForPrice] CSV ${filePath} missing required columns (case-sensitive check): ${missingColsMessages.join('; ')}. Actual headers found: ${headerRow.join(', ')}.`);
         return null;
     }
-    const normalizedTargetPricingModel = targetPricingModel.toLowerCase(); // Normalize for value comparison, not header lookup
-    console.log(`[GCF/parseGenericCsvForPrice] Normalized target pricing model for lookup (if model column used): '${normalizedTargetPricingModel}'`);
+    // Normalize the targetPricingModelContext only for value comparison if a modelColumnName is actually used.
+    const normalizedTargetPricingModelForValueComparison = modelColumnName ? targetPricingModelContext.toLowerCase() : '';
+    if (modelColumnName) {
+        console.log(`[GCF/parseGenericCsvForPrice] Normalized target pricing model for value comparison (if model column '${modelColumnName}' used): '${normalizedTargetPricingModelForValueComparison}'`);
+    }
     for (let i = 1; i < rows.length; i++) {
         const rowString = rows[i]?.trim();
         if (!rowString)
@@ -227,27 +230,27 @@ filePath) {
         const csvInstanceId = rowValues[instanceNameColIndex]?.trim() || '';
         const csvHourlyPriceStr = rowValues[hourlyPriceColIndex]?.trim();
         if (i < 5 || targetInstanceIdToLookup === csvInstanceId) {
-            const modelInRow = modelColumnName && pricingModelColIndex !== -1 ? rowValues[pricingModelColIndex] : "N/A (model column not used for this lookup)";
-            const modelInRowNormalized = modelColumnName && pricingModelColIndex !== -1 ? (rowValues[pricingModelColIndex]?.trim().toLowerCase() || '') : "N/A (model column not used for this lookup)";
-            console.log(`[GCF/parseGenericCsvForPrice] Row ${i + 1} Data: Instance='${csvInstanceId}', Model(raw)='${modelInRow}', Model(norm)='${modelInRowNormalized}', Price(raw)='${csvHourlyPriceStr}'`);
+            const modelInRowRaw = modelColumnName && pricingModelColIndex !== -1 ? rowValues[pricingModelColIndex] : "N/A (model column not used)";
+            const modelInRowNormalized = modelColumnName && pricingModelColIndex !== -1 ? (rowValues[pricingModelColIndex]?.trim().toLowerCase() || '') : "N/A (model column not used)";
+            console.log(`[GCF/parseGenericCsvForPrice] Row ${i + 1} Data: Instance='${csvInstanceId}', ModelInCSV(raw)='${modelInRowRaw}', ModelInCSV(norm)='${modelInRowNormalized}', PriceInCSV(raw)='${csvHourlyPriceStr}'`);
         }
         if (csvInstanceId === targetInstanceIdToLookup) {
             let modelConditionMet = false;
             if (!modelColumnName) {
-                modelConditionMet = true;
-                console.log(`[GCF/parseGenericCsvForPrice] Instance '${csvInstanceId}' matched. Skipping model column check as it's not required (e.g., On-Demand or direct RI column). Using price column '${priceColumnName}'.`);
+                modelConditionMet = true; // No model column to check, just use the price from priceColumnName
+                console.log(`[GCF/parseGenericCsvForPrice] Instance '${csvInstanceId}' matched. No model column ('${modelColumnName}') was specified for filtering. Using price from column '${priceColumnName}'.`);
             }
             else {
-                const csvPricingModel = rowValues[pricingModelColIndex]?.trim().toLowerCase() || ''; // Value in model column still normalized for comparison
-                if (csvPricingModel === normalizedTargetPricingModel) {
+                const csvPricingModelValue = rowValues[pricingModelColIndex]?.trim().toLowerCase() || '';
+                if (csvPricingModelValue === normalizedTargetPricingModelForValueComparison) {
                     modelConditionMet = true;
-                    console.log(`[GCF/parseGenericCsvForPrice] Instance '${csvInstanceId}' and Model '${csvPricingModel}' (from column '${modelColumnName}') matched. Using price column '${priceColumnName}'.`);
+                    console.log(`[GCF/parseGenericCsvForPrice] Instance '${csvInstanceId}' and Model '${csvPricingModelValue}' (from column '${modelColumnName}') matched target '${normalizedTargetPricingModelForValueComparison}'. Using price from column '${priceColumnName}'.`);
                 }
             }
             if (modelConditionMet) {
-                console.log(`[GCF/parseGenericCsvForPrice] Matched row for ${targetInstanceIdToLookup} (pricing model context: ${modelColumnName ? targetPricingModel : 'Direct Price Column'}). Raw price string from column '${priceColumnName}': '${csvHourlyPriceStr}'`);
+                console.log(`[GCF/parseGenericCsvForPrice] Matched row for ${targetInstanceIdToLookup} (pricing model context from request: '${targetPricingModelContext}'). Raw price string from CSV column '${priceColumnName}': '${csvHourlyPriceStr}'`);
                 if (csvHourlyPriceStr === undefined || csvHourlyPriceStr === null || csvHourlyPriceStr === '') {
-                    console.warn(`[GCF/parseGenericCsvForPrice] Matched row for ${targetInstanceIdToLookup} (${targetPricingModel}) but hourly price string is empty/undefined in ${filePath} from column '${priceColumnName}'.`);
+                    console.warn(`[GCF/parseGenericCsvForPrice] Matched row for ${targetInstanceIdToLookup} (context: ${targetPricingModelContext}) but hourly price string is empty/undefined in ${filePath} from column '${priceColumnName}'.`);
                     continue;
                 }
                 const price = parseFloat(csvHourlyPriceStr);
@@ -256,18 +259,19 @@ filePath) {
                     return price;
                 }
                 else {
-                    console.warn(`[GCF/parseGenericCsvForPrice] Matched row for ${targetInstanceIdToLookup} (${targetPricingModel}) but hourly price '${csvHourlyPriceStr}' from column '${priceColumnName}' is not valid number in ${filePath}.`);
+                    console.warn(`[GCF/parseGenericCsvForPrice] Matched row for ${targetInstanceIdToLookup} (context: ${targetPricingModelContext}) but hourly price '${csvHourlyPriceStr}' from column '${priceColumnName}' is not valid number in ${filePath}.`);
                 }
             }
         }
     }
-    console.warn(`[GCF/parseGenericCsvForPrice] Price not found in generic CSV ${filePath} for instance (lookup ID) '${targetInstanceIdToLookup}' (original ID: '${originalInstanceId}') with pricing model context '${targetPricingModel}' (model column used: '${modelColumnName || "N/A (direct price column)"}', price column checked: '${priceColumnName}'). Checked ${rows.length - 1} data rows.`);
+    console.warn(`[GCF/parseGenericCsvForPrice] Price not found in generic CSV ${filePath} for instance (lookup ID) '${targetInstanceIdToLookup}' (original ID: '${originalInstanceId}') with pricing model context '${targetPricingModelContext}' (model column used: '${modelColumnName || "N/A (direct price column lookup)"}', price column checked: '${priceColumnName}'). Checked ${rows.length - 1} data rows.`);
     return null;
 }
 const getPricingData = async (req, res) => {
     console.log(`[GCF/getPricingData] Function invoked. Configured GCS_BUCKET_NAME: ${configuredBucketName || 'NOT SET'}`);
     let awsPriceColumnForLookup = '';
-    let awsModelColumnForLookup = ''; // Ensure this is declared for the scope
+    let awsModelColumnForLookup = '';
+    let awsInstanceColumn = '';
     if (req.method === 'OPTIONS') {
         corsHandler(req, res, () => { res.status(204).send(''); });
         return;
@@ -297,7 +301,7 @@ const getPricingData = async (req, res) => {
         try {
             if (provider === 'Google Cloud') {
                 gcsFolder = 'GCE';
-                csvFileName = `gce_all_models_${regionId}.csv`; // Assuming this is the GCE naming convention
+                csvFileName = `gce_all_models_${regionId}.csv`;
                 console.log(`[GCF/getPricingData/GCE] Constructed csvFileName: '${csvFileName}' from regionId: '${regionId}'`);
                 filePath = `${gcsFolder}/${csvFileName}`;
                 console.log(`[GCF/getPricingData/GCE] Constructed filePath: '${filePath}'`);
@@ -334,7 +338,7 @@ const getPricingData = async (req, res) => {
             }
             else if (provider === 'AWS') {
                 gcsFolder = 'EC2';
-                csvFileName = `aws_ec2_all_pricing_${regionId}.csv`; // Corrected AWS CSV naming convention
+                csvFileName = `aws_ec2_all_pricing_${regionId}.csv`;
                 console.log(`[GCF/getPricingData/AWS] Constructed csvFileName: '${csvFileName}' from regionId: '${regionId}'`);
                 filePath = `${gcsFolder}/${csvFileName}`;
                 console.log(`[GCF/getPricingData/AWS] Constructed filePath: '${filePath}'`);
@@ -349,53 +353,39 @@ const getPricingData = async (req, res) => {
                         awsInstanceIdToLookup = strippedId;
                     }
                 }
-                console.log(`[GCF/getPricingData/AWS] Original instanceId: '${instanceId}', Lookup instanceId: '${awsInstanceIdToLookup}'`);
-                let awsInstanceColumn = 'instance_name'; // Assuming this is the exact case-sensitive header in your CSV
-                // awsModelColumnForLookup and awsPriceColumnForLookup already declared
+                console.log(`[GCF/getPricingData/AWS] Original instanceId from client: '${instanceId}', Transformed lookup instanceId for CSV: '${awsInstanceIdToLookup}'`);
+                awsInstanceColumn = 'InstanceType'; // Corrected: Use 'InstanceType' for AWS
+                awsModelColumnForLookup = ''; // Default to no model column, direct price column lookup
                 const lowerPricingModelValue = pricingModelValue.toLowerCase();
                 if (lowerPricingModelValue === 'on-demand') {
-                    awsPriceColumnForLookup = 'OnDemand_Hourly'; // Exact case from user
-                    awsModelColumnForLookup = '';
+                    awsPriceColumnForLookup = 'OnDemand_Hourly';
                 }
-                else if (lowerPricingModelValue === 'spot-hourly') { // Assuming a value for Spot if you add it
-                    awsPriceColumnForLookup = 'Spot_Hourly'; // Exact case from user
-                    awsModelColumnForLookup = '';
+                else if (lowerPricingModelValue === 'spot-hourly') {
+                    awsPriceColumnForLookup = 'Spot_Hourly';
                 }
                 else if (lowerPricingModelValue === 'aws-ri-1yr-noupfront') {
-                    awsPriceColumnForLookup = 'RI_1yr_NoUpfront'; // Exact case
-                    awsModelColumnForLookup = '';
+                    awsPriceColumnForLookup = 'RI_1yr_NoUpfront';
                 }
                 else if (lowerPricingModelValue === 'aws-ri-3yr-noupfront') {
-                    awsPriceColumnForLookup = 'RI_3yr_NoUpfront'; // Exact case
-                    awsModelColumnForLookup = '';
+                    awsPriceColumnForLookup = 'RI_3yr_NoUpfront';
                 }
                 else if (lowerPricingModelValue === 'aws-ri-1yr-partialupfront') {
-                    awsPriceColumnForLookup = 'RI_1yr_PartialUpfront'; // Exact case
-                    awsModelColumnForLookup = '';
+                    awsPriceColumnForLookup = 'RI_1yr_PartialUpfront';
                 }
                 else if (lowerPricingModelValue === 'aws-ri-3yr-partialupfront') {
-                    awsPriceColumnForLookup = 'RI_3yr_PartialUpfront'; // Exact case
-                    awsModelColumnForLookup = '';
+                    awsPriceColumnForLookup = 'RI_3yr_PartialUpfront';
                 }
                 else if (lowerPricingModelValue === 'aws-ri-1yr-allupfront') {
-                    awsPriceColumnForLookup = 'RI_1yr_AllUpfront'; // Exact case
-                    awsModelColumnForLookup = '';
+                    awsPriceColumnForLookup = 'RI_1yr_AllUpfront';
                 }
                 else if (lowerPricingModelValue === 'aws-ri-3yr-allupfront') {
-                    awsPriceColumnForLookup = 'RI_3yr_AllUpfront'; // Exact case
-                    awsModelColumnForLookup = '';
+                    awsPriceColumnForLookup = 'RI_3yr_AllUpfront';
                 }
                 else {
-                    console.warn(`[GCF/getPricingData/AWS] Unknown AWS pricing model value '${pricingModelValue}'. Defaulting to on-demand column if available or generic hourly_price.`);
-                    awsPriceColumnForLookup = 'OnDemand_Hourly'; // Fallback, or you could use 'hourly_price' if that's a generic column
-                    awsModelColumnForLookup = ''; // Or 'pricing_model' if you want to try matching the raw value
+                    console.warn(`[GCF/getPricingData/AWS] Unknown AWS pricing model value '${pricingModelValue}'. Attempting fallback to 'OnDemand_Hourly'.`);
+                    awsPriceColumnForLookup = 'OnDemand_Hourly'; // Fallback
                 }
-                if (!awsModelColumnForLookup) {
-                    console.log(`[GCF/getPricingData/AWS] AWS model '${pricingModelValue}': Using direct price column '${awsPriceColumnForLookup}'. No model column matching needed.`);
-                }
-                else {
-                    console.log(`[GCF/getPricingData/AWS] AWS model '${pricingModelValue}': Using model column '${awsModelColumnForLookup}' and price column '${awsPriceColumnForLookup}'.`);
-                }
+                console.log(`[GCF/getPricingData/AWS] For model '${pricingModelValue}': Instance column='${awsInstanceColumn}', Price column='${awsPriceColumnForLookup}', Model filter column='${awsModelColumnForLookup || "N/A (direct price column)"}'.`);
                 console.log(`[GCF/getPricingData] Attempting AWS CSV download: gs://${configuredBucketName}/${filePath}`);
                 const awsFile = storage.bucket(configuredBucketName).file(filePath);
                 const [exists] = await awsFile.exists();
@@ -417,7 +407,7 @@ const getPricingData = async (req, res) => {
                 res.status(200).send({ hourlyPrice: foundPrice });
             }
             else {
-                let specificErrorMsg = `Price not found for instance ${instanceId} with pricing model ${pricingModelValue} in CSV file ${filePath}.`;
+                let specificErrorMsg = `Price not found for instance ${instanceId} (lookup ID: ${provider === 'AWS' ? instanceId.replace(/^aws-/, '').replace('-', '.') : instanceId}) with pricing model ${pricingModelValue} in CSV file ${filePath}.`;
                 if (provider === 'Google Cloud') {
                     specificErrorMsg += ` Check GCE CSV content for matching '${instanceId.replace(/^gcp-/, '')}' (MachineFamily) and ensure model '${pricingModelValue}' maps to existing VCPU/RAM price columns (case-sensitive: e.g., OnDemand_VCPU_per_Hour).`;
                 }
@@ -438,7 +428,8 @@ const getPricingData = async (req, res) => {
                     }
                     const priceColForErrorMsg = awsPriceColumnForLookup || "N/A";
                     const modelColForErrorMsg = awsModelColumnForLookup || "N/A (direct price column lookup)";
-                    specificErrorMsg += ` Check AWS CSV content for instance (lookup ID '${lookupIdForError}') and pricing model context '${pricingModelValue}'. Price was looked for in column '${priceColForErrorMsg}'. Model matching (if applicable) was against column '${modelColForErrorMsg}'. Column headers are case-sensitive (e.g., instance_name, OnDemand_Hourly).`;
+                    const instanceColForErrorMsg = awsInstanceColumn || "N/A";
+                    specificErrorMsg += ` Check AWS CSV content for instance (lookup ID '${lookupIdForError}') using instance column '${instanceColForErrorMsg}'. Price was looked for in column '${priceColForErrorMsg}'. Model matching (if applicable) was against column '${modelColForErrorMsg}'. Column headers are case-sensitive.`;
                 }
                 console.warn(`[GCF/getPricingData] FINAL - ${specificErrorMsg}`);
                 res.status(404).send({ error: specificErrorMsg });
@@ -468,7 +459,8 @@ const getPricingData = async (req, res) => {
             if (provider === 'AWS') {
                 const priceColForCatch = awsPriceColumnForLookup || "N/A";
                 const modelColForCatch = awsModelColumnForLookup || "N/A (direct price column lookup)";
-                errorMessage += ` AWS lookup details: Price Column='${priceColForCatch}', Model Column='${modelColForCatch}'.`;
+                const instanceColForCatch = awsInstanceColumn || "N/A";
+                errorMessage += ` AWS lookup details: Instance Column='${instanceColForCatch}', Price Column='${priceColForCatch}', Model Column='${modelColForCatch}'.`;
             }
             res.status(statusCode).send({ error: errorMessage, details: error.message });
         }
